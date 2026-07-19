@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="theme-color" content="#3b82f6">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" href="./icon-192.png">
+  <!-- iOS: dukungan Add to Home Screen (Safari tidak baca manifest sepenuhnya) -->
+  <link rel="apple-touch-icon" href="./icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="MAR SUM">
+  <title>MAR SUM Offline</title>
+  <style>
+    /* ===== DESIGN SYSTEM (BIRU SUM — token selaras web GAS Theme.gs) ===== */
+    :root{
+      --bg:#F8FAFC;--bg-secondary:#F3F4F6;--card:#FFFFFF;--border:#E5E7EB;
+      --text:#111827;--text-secondary:#6B7280;--text-disabled:#9CA3AF;
+      --primary:#3b82f6;--primary-hover:#1e40af;--primary-soft:#EFF6FF;
+      --success:#10B981;--warning:#F59E0B;--error:#EF4444;
+      --input-border:#D1D5DB;--radius:16px;--radius-sm:10px;
+      --shadow:0 4px 12px rgba(0,0,0,.05);--shadow-hover:0 8px 24px rgba(0,0,0,.08);
+      --focus-ring:0 0 0 3px rgba(59,130,246,.25);
+    }
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+    body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+    .top{position:sticky;top:0;background:var(--card);padding:12px 16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);box-shadow:0 1px 2px rgba(0,0,0,.04);z-index:5}
+    .top h1{font-size:16px;font-weight:700;color:var(--text);flex:1}
+    .dot{width:9px;height:9px;border-radius:50%;background:var(--error)}
+    .net{font-size:11px;color:var(--text-secondary)}
+    .logoutBtn{font-size:11px;color:var(--text-secondary);background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px 10px;cursor:pointer}
+    .wrap{padding:16px;max-width:560px;margin:0 auto}
+    .tabBar{display:none;gap:6px;margin-bottom:14px;background:var(--bg-secondary);border-radius:12px;overflow:hidden;border:1px solid var(--border);padding:4px}
+    .tab{flex:1;text-align:center;padding:10px 4px;font-size:13px;font-weight:700;color:var(--text-secondary);cursor:pointer;border:none;background:none;border-radius:8px}
+    .tab.active{background:var(--primary);color:#fff}
+    .card,.panel{background:var(--card);border-radius:var(--radius);padding:16px;margin-bottom:12px;border:1px solid var(--border);box-shadow:var(--shadow)}
+    .cardTop{display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px}
+    .badge{font-size:10px;font-weight:700;color:#fff;padding:3px 9px;border-radius:99px;white-space:nowrap}
+    .cardBody{font-size:13px;color:var(--text-secondary);line-height:1.5}
+    .ket{font-size:12px;color:#B45309;margin-top:6px;background:#FEF3C7;padding:6px 9px;border-radius:8px}
+    .err{border-color:#FECACA;background:#FEF2F2;font-size:12px;color:#DC2626}
+    .big{display:block;width:100%;margin-top:10px;padding:13px;font-size:15px;font-weight:700;color:#fff;background:var(--primary);border:0;border-radius:var(--radius-sm);cursor:pointer}
+    .big:hover{background:var(--primary-hover)}
+    .big:active{transform:scale(0.98)}
+    .big.danger{background:var(--error);color:#fff}
+    .big.secondary{background:var(--card);color:var(--text);border:1px solid var(--border)}
+    .mini{padding:6px 11px;font-size:12px;border:0;border-radius:8px;background:var(--primary);color:#fff;font-weight:700;margin-top:5px;cursor:pointer}
+    .mini.gray{background:var(--card);color:var(--text);border:1px solid var(--border)}
+    .empty{text-align:center;color:var(--text-disabled);padding:40px 10px;line-height:1.7}
+    .sub{font-size:12px;color:var(--text-secondary);margin:3px 0 8px}
+    .inp,select{width:100%;padding:11px;font-size:15px;background:var(--card);color:var(--text);border:1px solid var(--input-border);border-radius:var(--radius-sm);margin:4px 0 12px}
+    .inp:focus,select:focus,input:focus{border-color:var(--primary);box-shadow:var(--focus-ring);outline:none}
+    label{font-size:12px;color:var(--text-secondary);font-weight:600}
+    .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .teamRow{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+    .teamRow select{flex:1}
+    .obinfo{font-size:12px;color:#B45309;font-weight:700;margin-bottom:6px}
+    .modal{display:none;position:fixed;inset:0;background:rgba(17,24,39,.55);z-index:50;align-items:flex-end;justify-content:center}
+    .sheet{background:var(--card);width:100%;max-width:560px;border-radius:var(--radius) var(--radius) 0 0;padding:20px 16px 24px;max-height:92vh;overflow-y:auto}
+    .sheet h2{font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px}
+    .sheet .desc{font-size:13px;color:var(--text-secondary);margin-bottom:8px;line-height:1.5}
+    #toast{display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--primary);color:#fff;font-weight:700;padding:11px 16px;border-radius:var(--radius-sm);font-size:13px;z-index:99;max-width:92vw;text-align:center;box-shadow:var(--shadow-hover)}
+    .syncbar{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+    .syncbar button{flex:0 0 auto}
+    .chkRow{display:flex;align-items:center;gap:6px;margin:6px 0;font-size:13px;color:var(--text)}
+    .chkRow input[type="checkbox"]{width:18px;height:18px;accent-color:var(--primary)}
+    .ovBox{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:var(--radius-sm);padding:11px;margin:8px 0}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <h1>🔧 MAR SUM</h1>
+    <span class="dot" id="netDot"></span><span class="net" id="netText">-</span>
+    <button class="logoutBtn" id="installBtn" style="display:none;background:var(--primary);color:#fff;border-color:var(--primary)" onclick="doInstall()">📲 Instal</button>
+    <button class="logoutBtn" onclick="doLogout()">Logout</button>
+  </div>
+
+  <!-- LOGIN -->
+  <div class="wrap" id="screen-login" style="display:none">
+    <div class="panel">
+      <h2 style="color:#111827;font-size:16px;margin-bottom:4px">Masukkan Token</h2>
+      <p class="sub">Token dari admin, cukup diisi SEKALI.</p>
+      <input class="inp" id="tokenInput" placeholder="token..." autocomplete="off">
+      <button class="big" onclick="doLogin()">Masuk</button>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="wrap" id="screen-main" style="display:none">
+    <div class="syncbar">
+      <button class="mini" id="syncBtn" onclick="syncNow(true)">🔄 Sync</button>
+      <div><div style="font-size:13px;font-weight:700" id="meName"></div><div class="sub" style="margin:0" id="lastSync"></div></div>
+    </div>
+    <div class="obinfo" id="outboxInfo" onclick="toggleOutboxDetail()" style="cursor:pointer"></div>
+    <div id="outboxDetail" style="display:none;margin-bottom:8px"></div>
+    <div id="failedOps"></div>
+    <div class="tabBar" id="tabBar">
+      <button class="tab active" id="tabWos" onclick="switchTab('wos')">📋 WO Saya</button>
+      <button class="tab" id="tabCreate" onclick="switchTab('create')">➕ Buat WO</button>
+      <button class="tab" id="tabApproval" onclick="switchTab('approval')">✅ Approval</button>
+    </div>
+    <div id="content"></div>
+  </div>
+
+  <!-- MODAL: Submit (mekanik isi kerja) -->
+  <div class="modal" id="submitModal">
+    <div class="sheet">
+      <h2 id="fTitle">-</h2>
+      <div class="desc" id="fDesc"></div>
+      <div class="ket" id="fKet" style="display:none"></div>
+      <div class="row2">
+        <div><label>Jam Mulai *</label><input type="datetime-local" class="inp" id="fStart"></div>
+        <div><label>Jam Selesai *</label><input type="datetime-local" class="inp" id="fEnd"></div>
+      </div>
+      <div class="row2">
+        <div><label>Hour Meter *</label><input type="number" class="inp" id="fHm" min="0.1" step="any" placeholder="1250"></div>
+        <div><label>Kilometer *</label><input type="number" class="inp" id="fKm" min="0.1" step="any" placeholder="4500"></div>
+      </div>
+      <label>Jenis Part *</label>
+      <select class="inp" id="fPart"><option value="">-- Pilih Jenis Part --</option><option value="baru">🆕 Baru</option><option value="repair">🔧 Repair</option><option value="canibal">♻️ Canibal</option></select>
+      <button class="big" onclick="queueSubmit()">📮 Simpan & Antre</button>
+      <button class="big secondary" onclick="closeModal('submitModal')">Batal</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Create WO (SUM: component/unit/kondisi/others/team — tanpa section/job katalog) -->
+  <div class="modal" id="createModal">
+    <div class="sheet">
+      <h2>➕ Buat Work Order</h2>
+      <label>Pekerjaan *</label>
+      <select class="inp" id="cComp" onchange="onCompChange()"></select>
+
+      <!-- Others fields (saat pilih Others) -->
+      <div id="cOthersWrap" style="display:none">
+        <label>Deskripsi Job *</label>
+        <input class="inp" id="cOthersDesc" placeholder="cth: perbaikan custom" oninput="updateCreatePreview()">
+        <div class="row2">
+          <div><label>Base Points *</label><input type="number" class="inp" id="cOthersBp" min="0.01" step="any" placeholder="0.5" oninput="updateCreatePreview()"></div>
+          <div><label>Target Hours *</label><input type="number" class="inp" id="cOthersTh" min="0.01" step="any" placeholder="2" oninput="updateCreatePreview()"></div>
+        </div>
+        <label>Unit Factor *</label>
+        <input type="number" class="inp" id="cOthersUf" min="0.1" step="0.01" placeholder="1.0" oninput="updateCreatePreview()">
+        <div class="sub" style="margin-top:-8px">Pengali kesulitan (mis. 1.0 standar, 1.2 kompleks)</div>
+      </div>
+
+      <!-- Unit (disembunyikan saat Others) -->
+      <div id="cUnitWrap">
+        <label>Unit *</label>
+        <select class="inp" id="cUnit" onchange="updateCreatePreview()"></select>
+      </div>
+
+      <label>Work Condition *</label>
+      <select class="inp" id="cWc" onchange="updateCreatePreview()"></select>
+
+      <label>Lokasi *</label>
+      <select class="inp" id="cLoc"><option value="workshop">🏭 Bengkel</option><option value="field">🚜 Lapangan</option></select>
+
+      <label>Keterangan (opsional)</label>
+      <input class="inp" id="cKet" placeholder="cth: unit di pit 3">
+
+      <label>Tim Mekanik *</label>
+      <div id="cTeamList"></div>
+      <button class="mini" onclick="addTeamMember()" style="margin-bottom:10px">+ Tambah Mekanik</button>
+
+      <div class="panel" id="cPreview" style="display:none;background:#EFF6FF;border-color:#BFDBFE;padding:11px;margin-bottom:10px">
+        <div class="sub" style="margin:0 0 4px;font-weight:700;color:#1e40af">📊 Preview Poin</div>
+        <div id="cPreviewBody" style="font-size:13px;color:#111827"></div>
+      </div>
+      <button class="big" onclick="queueCreate(true)">➕ Simpan & Buat Lagi</button>
+      <button class="big" onclick="queueCreate(false)" style="background:#15803d">📮 Simpan & Selesai</button>
+      <button class="big secondary" onclick="closeModal('createModal')">Batal</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Approve/Reject (SUM: tanpa MTBF, DENGAN override) -->
+  <div class="modal" id="approveModal">
+    <div class="sheet">
+      <h2 id="aTitle">-</h2>
+      <div class="desc" id="aDesc"></div>
+      <div class="sub" id="aTeam"></div>
+      <div class="sub" id="aStatus"></div>
+
+      <!-- OVERRIDE base_points / target_hours (parity dgn web) -->
+      <div class="ovBox">
+        <div class="sub" style="margin:0 0 6px;font-weight:700;color:#1e40af">✏️ Override (opsional)</div>
+        <div class="row2">
+          <div><label>Base Points</label><input type="number" class="inp" id="aOvBp" min="0" step="any" placeholder="pakai bawaan"></div>
+          <div><label>Target Hours</label><input type="number" class="inp" id="aOvTh" min="0" step="any" placeholder="pakai bawaan"></div>
+        </div>
+        <button class="mini" onclick="queueOverride()">💾 Simpan Override</button>
+        <div class="sub" style="margin:6px 0 0">Override diantre & tersimpan SEBELUM approve (FIFO).</div>
+      </div>
+
+      <label>Catatan</label>
+      <input class="inp" id="aNotes" placeholder="opsional">
+      <div class="chkRow"><input type="checkbox" id="aSafety"><label>Safety Incident (poin → 0)</label></div>
+      <button class="big" id="aBtnL1" onclick="queueApprove(1)">✅ Approve L1</button>
+      <button class="big" id="aBtnL2" onclick="queueApprove(2)">✅ Approve L2 (Award Poin)</button>
+      <button class="big secondary" onclick="toggleRejectSection()">❌ Reject</button>
+      <div id="aRejectSection" style="display:none;margin-top:8px">
+        <label>Alasan Reject *</label>
+        <input class="inp" id="aReason" placeholder="alasan reject wajib diisi">
+        <button class="big danger" onclick="queueReject()">🚫 Kirim Reject</button>
+      </div>
+      <button class="big secondary" onclick="closeModal('approveModal')" style="margin-top:6px">Batal</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Cancel WO -->
+  <div class="modal" id="cancelModal">
+    <div class="sheet">
+      <h2>🗑 Batalkan Work Order</h2>
+      <div class="desc" id="cxDesc">-</div>
+      <div class="err" style="margin-bottom:8px">⚠️ Jika WO sudah <b>approved</b>, poin & rupiah mekanik akan <b>di-nol-kan</b> otomatis.</div>
+      <label>Alasan pembatalan *</label>
+      <input class="inp" id="cxReason" placeholder="alasan wajib diisi">
+      <button class="big danger" onclick="queueCancel()">🚫 Batalkan WO</button>
+      <button class="big secondary" onclick="closeModal('cancelModal')">Kembali</button>
+    </div>
+  </div>
+
+  <!-- MODAL: panduan instal iPhone/iPad -->
+  <div class="modal" id="iosModal">
+    <div class="sheet">
+      <h2>📲 Instal di iPhone / iPad</h2>
+      <div class="desc" style="line-height:1.9">
+        1. Buka link ini di <b>Safari</b><br>
+        2. Tap tombol <b>Bagikan</b> <span style="border:1px solid var(--border);border-radius:6px;padding:1px 7px">⬆️</span> di bawah layar<br>
+        3. Scroll → pilih <b>"Tambahkan ke Layar Utama"</b> (Add to Home Screen)<br>
+        4. Tap <b>Tambah</b> — ikon <b>MAR SUM</b> muncul di layar utama
+      </div>
+      <div class="sub">Dari Chrome iPhone: tombol Bagikan → Add to Home Screen (sama).</div>
+      <button class="big secondary" onclick="closeModal('iosModal')">Tutup</button>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <script src="./app.js"></script>
+</body>
+</html>
