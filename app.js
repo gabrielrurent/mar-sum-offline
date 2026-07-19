@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v1'; // samakan dgn CACHE 'mar-sum-v1' di sw.js tiap rilis
+var APP_VERSION = 'sum-v2'; // samakan dgn CACHE 'mar-sum-v2' di sw.js tiap rilis
 var S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -488,6 +488,7 @@ function openApproveForm(woId) {
     '🔧 Part: '+esc(partLabel(a.part_type))+
     (a.hour_meter ? '<br>HM: '+esc(a.hour_meter) : '')+(a.kilometers ? ' · KM: '+esc(a.kilometers) : '')+
     (a.created_by_name ? '<br>👤 Pembuat: '+esc(a.created_by_name) : (a.created_by ? '<br>👤 Pembuat: '+esc(a.created_by) : ''))+
+    (a.submitted_by_name ? '<br>✍️ Disubmit oleh: '+esc(a.submitted_by_name) : (a.submitted_by ? '<br>✍️ Disubmit oleh: '+esc(a.submitted_by) : ''))+
     (a.keterangan ? '<br>📝 '+esc(a.keterangan) : '');
   document.getElementById('aTeam').textContent = 'Tim: '+(a.team||[]).map(function(t){return t.name;}).join(', ');
   document.getElementById('aStatus').textContent = 'Status: '+a.status;
@@ -498,6 +499,7 @@ function openApproveForm(woId) {
   document.getElementById('aSafety').checked = false;
   document.getElementById('aOvBp').value='';
   document.getElementById('aOvTh').value='';
+  aOvRenderTeam(a.team || []); // editor tim override — prefilled tim saat ini
   document.getElementById('aReason').value='';
   document.getElementById('aRejectSection').style.display='none';
   showModal('approveModal');
@@ -506,13 +508,49 @@ function toggleRejectSection() {
   var el = document.getElementById('aRejectSection');
   el.style.display = el.style.display==='none' ? 'block' : 'none';
 }
+// Editor tim override: prefilled tim saat ini; bisa tambah/kurang mekanik.
+function _aOvRow(selId, selName) {
+  var div = document.createElement('div'); div.className = 'teamRow';
+  var mechs = (S.refs && S.refs.mechanics) || [];
+  var found = false;
+  var opts = '<option value="">-- Pilih Mekanik --</option>';
+  for (var m=0;m<mechs.length;m++) {
+    var sel = (String(mechs[m].mechanic_id)===String(selId)) ? ' selected' : '';
+    if (sel) found = true;
+    opts += '<option value="'+esc(mechs[m].mechanic_id)+'"'+sel+'>'+esc(mechs[m].mechanic_name)+'</option>';
+  }
+  // fallback: anggota tim yg tak ada di daftar refs tetap terjaga (jangan hilang senyap)
+  if (selId && !found) opts = '<option value="'+esc(selId)+'" selected>'+esc(selName||selId)+'</option>' + opts;
+  div.innerHTML = '<select class="aOvSel inp">'+opts+'</select><button type="button" class="mini gray" onclick="this.parentNode.remove()">✕</button>';
+  return div;
+}
+function aOvRenderTeam(team) {
+  var box = document.getElementById('aOvTeam'); box.innerHTML='';
+  (team||[]).forEach(function(t){ box.appendChild(_aOvRow(t.mechanic_id, t.name)); });
+}
+function aOvAddMember() { document.getElementById('aOvTeam').appendChild(_aOvRow('', '')); }
+
 function queueOverride() {
   var bp = document.getElementById('aOvBp').value.trim();
   var th = document.getElementById('aOvTh').value.trim();
-  if (bp==='' && th==='') { toast('Isi minimal 1 nilai override'); return; }
+  // tim dari editor
+  var sels = document.querySelectorAll('.aOvSel');
+  var team=[], seen={};
+  for (var i=0;i<sels.length;i++) {
+    var mid = sels[i].value;
+    if (!mid) continue;
+    if (seen[mid]) { toast('Mekanik duplikat di tim override'); return; }
+    seen[mid]=true; team.push({mechanic_id:mid, percentage:100}); // SUM full-point
+  }
+  var origIds = (activeApproval.team||[]).map(function(t){return String(t.mechanic_id);}).sort().join(',');
+  var newIds = team.map(function(t){return String(t.mechanic_id);}).sort().join(',');
+  var teamChanged = (newIds !== origIds);
+  if (teamChanged && team.length===0) { toast('Tim override minimal 1 mekanik'); return; }
+  if (bp==='' && th==='' && !teamChanged) { toast('Tidak ada perubahan override'); return; }
   var payload = { wo_id:activeApproval.id };
   if (bp!=='') payload.base_points = parseFloat(bp);
   if (th!=='') payload.target_hours = parseFloat(th);
+  if (teamChanged) payload.team = team;
   var op = { op_id:uuid(), seq:(_enqSeq++), action:'save_override', wo_id:activeApproval.id, wo_number:activeApproval.wo_number,
     payload:payload, status:'queued', created_at:new Date().toISOString(), label:'Override '+activeApproval.wo_number };
   obPut(op).then(refreshOutbox).then(function() {
@@ -722,6 +760,7 @@ function renderPendingList(){
       '🔧 Part: '+esc(partLabel(wo.part_type))+
       (wo.hour_meter?' · HM: '+esc(wo.hour_meter):'')+(wo.kilometers?' · KM: '+esc(wo.kilometers):'')+
       (wo.created_by_name?'<br>👤 Pembuat: '+esc(wo.created_by_name):'')+
+      (wo.submitted_by_name?'<br>✍️ Disubmit: '+esc(wo.submitted_by_name):'')+
       '<br>👥 Tim: '+teamStr(wo.team)+'</div>'+
       (wo.keterangan?'<div class="ket">📝 '+esc(wo.keterangan)+'</div>':'')+
       (function(){ var q=queuedOpFor(wo.id); return q ? queuedNote(q)

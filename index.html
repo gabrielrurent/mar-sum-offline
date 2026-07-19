@@ -181,15 +181,18 @@
       <div class="sub" id="aTeam"></div>
       <div class="sub" id="aStatus"></div>
 
-      <!-- OVERRIDE base_points / target_hours (parity dgn web) -->
+      <!-- OVERRIDE base_points / target_hours / TIM (parity dgn web) -->
       <div class="ovBox">
         <div class="sub" style="margin:0 0 6px;font-weight:700;color:#1e40af">✏️ Override (opsional)</div>
         <div class="row2">
           <div><label>Base Points</label><input type="number" class="inp" id="aOvBp" min="0" step="any" placeholder="pakai bawaan"></div>
           <div><label>Target Hours</label><input type="number" class="inp" id="aOvTh" min="0" step="any" placeholder="pakai bawaan"></div>
         </div>
+        <label>Tim Mekanik <span class="sub" style="display:inline;margin:0">(tiap anggota poin penuh)</span></label>
+        <div id="aOvTeam"></div>
+        <button type="button" class="mini gray" onclick="aOvAddMember()" style="margin-bottom:6px">+ Tambah Mekanik</button>
         <button class="mini" onclick="queueOverride()">💾 Simpan Override</button>
-        <div class="sub" style="margin:6px 0 0">Override diantre & tersimpan SEBELUM approve (FIFO).</div>
+        <div class="sub" style="margin:6px 0 0">Override (base/target/tim) diantre & tersimpan SEBELUM approve (FIFO).</div>
       </div>
 
       <label>Catatan</label>
