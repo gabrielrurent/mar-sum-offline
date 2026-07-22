@@ -6,14 +6,162 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v3'; // samakan dgn CACHE 'mar-sum-v3' di sw.js tiap rilis
-var S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false };
+var APP_VERSION = 'sum-v4'; // samakan dgn CACHE 'mar-sum-v4' di sw.js tiap rilis
+var S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
 function refsStale() { return !S.refs || !S.refsAt || (Date.now() - new Date(S.refsAt).getTime() > REFS_TTL_MS); }
 var db = null;
 // Urutan enqueue dalam sesi — jaminan FIFO saat flush (override HARUS sebelum approve).
 var _enqSeq = 0;
+
+/* ── Live Timer Engine (Parity MAR-SUM-v2) ── */
+var _liveTimerTicker = null;
+function getTimerState(woId) {
+  if (!S.timerStates) S.timerStates = {};
+  if (!S.timerStates[woId]) {
+    S.timerStates[woId] = { state: 'idle', start_epoch: 0, elapsed_ms: 0 };
+  }
+  return S.timerStates[woId];
+}
+function saveTimerState(woId, state) {
+  if (!S.timerStates) S.timerStates = {};
+  S.timerStates[woId] = state;
+  kvSet('timer_states', S.timerStates);
+}
+function startLiveTimer(woId) {
+  var st = getTimerState(woId);
+  st.state = 'running';
+  st.start_epoch = Date.now();
+  saveTimerState(woId, st);
+  startTimerTicker();
+  renderAll();
+}
+function pauseLiveTimer(woId) {
+  var st = getTimerState(woId);
+  if (st.state !== 'running') return;
+  st.state = 'paused';
+  st.elapsed_ms += (Date.now() - st.start_epoch);
+  st.start_epoch = 0;
+  saveTimerState(woId, st);
+  renderAll();
+}
+function stopLiveTimer(woId) {
+  var st = getTimerState(woId);
+  var totalMs = st.elapsed_ms;
+  if (st.state === 'running') {
+    totalMs += (Date.now() - st.start_epoch);
+  }
+  st.state = 'idle';
+  st.elapsed_ms = 0;
+  st.start_epoch = 0;
+  saveTimerState(woId, st);
+  renderAll();
+  return totalMs;
+}
+function formatMsToHms(ms) {
+  if (!ms || ms < 0) return '00:00:00';
+  var sec = Math.floor(ms / 1000);
+  var hr = Math.floor(sec / 3600);
+  var min = Math.floor((sec - (hr * 3600)) / 60);
+  sec = sec - (hr * 3600) - (min * 60);
+  if (hr < 10) hr = '0' + hr;
+  if (min < 10) min = '0' + min;
+  if (sec < 10) sec = '0' + sec;
+  return hr + ':' + min + ':' + sec;
+}
+function formatToDatetimeLocal(date) {
+  var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+    'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+}
+function startTimerTicker() {
+  if (_liveTimerTicker) return;
+  _liveTimerTicker = setInterval(function() {
+    var hasRunning = false;
+    if (S.timerStates) {
+      for (var id in S.timerStates) {
+        if (S.timerStates[id] && S.timerStates[id].state === 'running') {
+          hasRunning = true;
+          break;
+        }
+      }
+    }
+    if (hasRunning) updateActiveTimerDisplays();
+  }, 1000);
+}
+function updateActiveTimerDisplays() {
+  if (S.timerStates) {
+    for (var woId in S.timerStates) {
+      var st = S.timerStates[woId];
+      if (!st) continue;
+      var curMs = st.elapsed_ms + (st.state === 'running' ? (Date.now() - st.start_epoch) : 0);
+      var cardDisp = document.getElementById('timer-clock-' + woId);
+      if (cardDisp) cardDisp.textContent = formatMsToHms(curMs);
+      if (activeWo && String(activeWo.id) === String(woId)) {
+        var mDisp = document.getElementById('modalTimerDisplay');
+        if (mDisp) mDisp.textContent = formatMsToHms(curMs);
+      }
+    }
+  }
+}
+function updateModalTimerUI() {
+  if (!activeWo) return;
+  var st = getTimerState(activeWo.id);
+  var disp = document.getElementById('modalTimerDisplay');
+  var bStart = document.getElementById('modalBtnStart');
+  var bPause = document.getElementById('modalBtnPause');
+  var bStop = document.getElementById('modalBtnStop');
+  if (!disp) return;
+
+  var curMs = st.elapsed_ms + (st.state === 'running' ? (Date.now() - st.start_epoch) : 0);
+  disp.textContent = formatMsToHms(curMs);
+
+  if (st.state === 'idle') {
+    bStart.style.display = 'inline-block'; bStart.textContent = '▶ Start';
+    bPause.style.display = 'none';
+    bStop.style.display = 'none';
+  } else if (st.state === 'running') {
+    bStart.style.display = 'none';
+    bPause.style.display = 'inline-block';
+    bStop.style.display = 'inline-block';
+  } else if (st.state === 'paused') {
+    bStart.style.display = 'inline-block'; bStart.textContent = '▶ Resume';
+    bPause.style.display = 'none';
+    bStop.style.display = 'inline-block';
+  }
+}
+function modalTimerStart() {
+  if (!activeWo) return;
+  startLiveTimer(activeWo.id);
+  updateModalTimerUI();
+}
+function modalTimerPause() {
+  if (!activeWo) return;
+  pauseLiveTimer(activeWo.id);
+  updateModalTimerUI();
+}
+function modalTimerStop() {
+  if (!activeWo) return;
+  var totalMs = stopLiveTimer(activeWo.id);
+  if (totalMs > 0) {
+    var now = new Date();
+    var start = new Date(now.getTime() - totalMs);
+    document.getElementById('fStart').value = formatToDatetimeLocal(start);
+    document.getElementById('fEnd').value = formatToDatetimeLocal(now);
+  }
+  updateModalTimerUI();
+}
+function openSubmitWithTimer(woId) {
+  var totalMs = stopLiveTimer(woId);
+  openSubmitForm(woId);
+  if (totalMs > 0) {
+    var now = new Date();
+    var start = new Date(now.getTime() - totalMs);
+    document.getElementById('fStart').value = formatToDatetimeLocal(start);
+    document.getElementById('fEnd').value = formatToDatetimeLocal(now);
+  }
+}
 
 /* ── IndexedDB ── */
 function openDb() {
@@ -282,6 +430,7 @@ function openSubmitForm(woId) {
   document.getElementById('fStart').value=''; document.getElementById('fEnd').value='';
   document.getElementById('fHm').value=''; document.getElementById('fKm').value='';
   document.getElementById('fPart').value='';
+  updateModalTimerUI();
   showModal('submitModal');
 }
 function queueSubmit() {
@@ -299,6 +448,135 @@ function queueSubmit() {
   obPut(op).then(refreshOutbox).then(function() {
     closeModal('submitModal'); renderAll();
     toast(navigator.onLine?'📮 Mengirim...':'📮 Tersimpan! Terkirim saat ada sinyal');
+    syncNow(false);
+  });
+}
+
+/* ── Transfer WO (Mekanik & Approver) ── */
+var activeTransferWo = null;
+function openTransferModal(woId) {
+  activeTransferWo = null;
+  for (var i=0;i<S.wos.length;i++) if (String(S.wos[i].id)===String(woId)) activeTransferWo=S.wos[i];
+  if (!activeTransferWo) return;
+  document.getElementById('trDesc').innerHTML = '<b>'+esc(activeTransferWo.wo_number)+'</b> — '+esc(activeTransferWo.component_name||'');
+  document.getElementById('trNote').value = '';
+  showModal('transferModal');
+}
+
+function queueRequestTransfer() {
+  if (!activeTransferWo) return;
+  var note = document.getElementById('trNote').value.trim();
+  var woId = activeTransferWo.id;
+  var st = getTimerState(woId);
+
+  var sessionStart = null;
+  if (st.state === 'running' || st.state === 'paused') {
+    var startMs = (st.state === 'running') ? st.start_epoch : (Date.now() - st.elapsed_ms);
+    sessionStart = new Date(startMs).toISOString();
+    st.state = 'idle'; st.elapsed_ms = 0; st.start_epoch = 0;
+    saveTimerState(woId, st);
+  }
+
+  var payload = {
+    wo_id: woId,
+    transfer_note: note,
+    session_start_time: sessionStart
+  };
+
+  var op = {
+    op_id: uuid(), seq: (_enqSeq++), action: 'request_transfer', wo_id: woId, wo_number: activeTransferWo.wo_number,
+    payload: payload, status: 'queued', created_at: new Date().toISOString(), label: 'Transfer ' + activeTransferWo.wo_number
+  };
+
+  activeTransferWo.status = 'pending_transfer';
+
+  obPut(op).then(refreshOutbox).then(function() {
+    closeModal('transferModal');
+    renderAll();
+    toast(navigator.onLine ? '📮 Permintaan transfer dikirim...' : '📮 Permintaan transfer tersimpan di antrean!');
+    syncNow(false);
+  });
+}
+
+var activeTransferApproval = null;
+function openApproveTransferModal(woId) {
+  activeTransferApproval = null;
+  for (var i = 0; i < S.pending.length; i++) {
+    if (String(S.pending[i].id) === String(woId)) activeTransferApproval = S.pending[i];
+  }
+  if (!activeTransferApproval) return;
+  var wo = activeTransferApproval;
+  document.getElementById('trAppDesc').innerHTML = 'WO: <b>' + esc(wo.wo_number) + '</b><br>Diminta oleh: <b>' + esc(wo.transfer_requested_by_name || wo.transfer_requested_by || wo.created_by_name || '-') + '</b>' +
+    (wo.transfer_note ? '<br>Catatan: <i>' + esc(wo.transfer_note) + '</i>' : '');
+  
+  var list = document.getElementById('trRecipientsList');
+  list.innerHTML = '';
+  addTransferRecipientRow();
+  showModal('approveTransferModal');
+}
+
+function _trRecipientRow() {
+  var div = document.createElement('div'); div.className = 'teamRow';
+  var mechs = (S.refs && S.refs.mechanics) || [];
+  var opts = '<option value="">-- Pilih Mekanik Penerima --</option>';
+  for (var m = 0; m < mechs.length; m++) {
+    opts += '<option value="' + esc(mechs[m].mechanic_id) + '">' + esc(mechs[m].mechanic_name) + '</option>';
+  }
+  div.innerHTML = '<select class="trSel inp">' + opts + '</select><button type="button" class="mini gray" onclick="this.parentNode.remove()">✕</button>';
+  return div;
+}
+
+function addTransferRecipientRow() {
+  var list = document.getElementById('trRecipientsList');
+  if (list) list.appendChild(_trRecipientRow());
+}
+
+function queueApproveTransfer() {
+  if (!activeTransferApproval) return;
+  var sels = document.querySelectorAll('.trSel');
+  var recipientIds = [], seen = {};
+  for (var i = 0; i < sels.length; i++) {
+    var val = sels[i].value;
+    if (val) {
+      if (seen[val]) { toast('Mekanik penerima duplikat'); return; }
+      seen[val] = true;
+      recipientIds.push(val);
+    }
+  }
+  if (recipientIds.length === 0) { toast('Pilih minimal 1 mekanik penerima'); return; }
+
+  var op = {
+    op_id: uuid(), seq: (_enqSeq++), action: 'approve_transfer', wo_id: activeTransferApproval.id, wo_number: activeTransferApproval.wo_number,
+    payload: { wo_id: activeTransferApproval.id, target_mechanic_ids: recipientIds },
+    status: 'queued', created_at: new Date().toISOString(), label: 'Approve Transfer ' + activeTransferApproval.wo_number
+  };
+
+  obPut(op).then(refreshOutbox).then(function() {
+    closeModal('approveTransferModal'); closeModal('approveModal'); renderAll();
+    toast(navigator.onLine ? '📮 Approve transfer dikirim...' : '📮 Approve transfer tersimpan!');
+    syncNow(false);
+  });
+}
+
+function queueRejectTransfer(woId) {
+  var reason = prompt('Masukkan alasan penolakan transfer:');
+  if (reason === null) return;
+  if (!reason.trim()) { toast('Alasan reject transfer wajib diisi'); return; }
+
+  var wo = null;
+  for (var i = 0; i < S.pending.length; i++) {
+    if (String(S.pending[i].id) === String(woId)) wo = S.pending[i];
+  }
+
+  var op = {
+    op_id: uuid(), seq: (_enqSeq++), action: 'reject_transfer', wo_id: woId, wo_number: wo ? wo.wo_number : woId,
+    payload: { wo_id: woId, rejection_reason: reason.trim() },
+    status: 'queued', created_at: new Date().toISOString(), label: 'Reject Transfer ' + (wo ? wo.wo_number : woId)
+  };
+
+  obPut(op).then(refreshOutbox).then(function() {
+    closeModal('approveModal'); renderAll();
+    toast(navigator.onLine ? '📮 Reject transfer dikirim...' : '📮 Reject transfer tersimpan!');
     syncNow(false);
   });
 }
@@ -611,7 +889,7 @@ function toast(msg) {
 }
 function toggleOutboxDetail(){ S.showOutbox = !S.showOutbox; renderAll(); }
 function opLabel(o){
-  var names = {submit_work:'Submit', create_wo:'Buat WO', approve_l1:'L1', approve_l2:'L2', reject:'Reject', save_override:'Override', cancel_wo:'Batal'};
+  var names = {submit_work:'Submit', create_wo:'Buat WO', approve_l1:'L1', approve_l2:'L2', reject:'Reject', save_override:'Override', cancel_wo:'Batal', request_transfer:'Transfer WO', approve_transfer:'Approve Transfer', reject_transfer:'Reject Transfer'};
   var base = o.label || names[o.action] || o.action;
   if (o.wo_number && String(base).indexOf(o.wo_number)===-1) base += ' '+o.wo_number;
   return base;
@@ -629,6 +907,7 @@ function badgeFor(wo,pendingOp) {
   }
   var s=String(wo.status||'');
   if (s==='pending_mechanic_work') return ['📝 Perlu diisi','#1d4ed8'];
+  if (s==='pending_transfer') return ['🔀 Pending Transfer','#4f46e5'];
   if (s==='pending_supervisor') return ['⏳ L1','#7c3aed'];
   if (s==='pending_superintendent') return ['⏳ L2','#7c3aed'];
   if (s==='approved') return ['✅ Approved','#15803d'];
@@ -691,12 +970,35 @@ function renderWos(el) {
   S.wos.forEach(function(wo) {
     var op=opByWo[wo.id]; var b=badgeFor(wo,op);
     var canFill=String(wo.status)==='pending_mechanic_work'&&(!op||op.status==='failed');
+
+    // Live Timer Widget
+    var st = getTimerState(wo.id);
+    var curMs = st.elapsed_ms + (st.state === 'running' ? (Date.now() - st.start_epoch) : 0);
+    var timerControls = '';
+    if (canFill) {
+      var isRunning = (st.state === 'running');
+      var isPaused = (st.state === 'paused');
+      timerControls = '<div class="timerPill">' +
+        '<div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:2px">⏱️ LIVE TIMER</div>' +
+        '<div class="timerClock" id="timer-clock-' + esc(String(wo.id)) + '">' + formatMsToHms(curMs) + '</div>' +
+        '<div class="timerBtns">' +
+          (isRunning ? '' : '<button type="button" class="timerBtn btnStart" onclick="startLiveTimer(\'' + esc(String(wo.id)) + '\')">▶ ' + (isPaused ? 'Resume' : 'Start') + '</button>') +
+          (isRunning ? '<button type="button" class="timerBtn btnPause" onclick="pauseLiveTimer(\'' + esc(String(wo.id)) + '\')">⏸ Pause</button>' : '') +
+          (st.state !== 'idle' ? '<button type="button" class="timerBtn btnStop" onclick="openSubmitWithTimer(\'' + esc(String(wo.id)) + '\')">⏹ Stop & Isi</button>' : '') +
+        '</div>' +
+      '</div>';
+    }
+
     html+='<div class="card"><div class="cardTop"><b>'+esc(wo.wo_number)+'</b><span class="badge" style="background:'+b[1]+'">'+b[0]+'</span>'+
       (wo.is_others?'<span class="badge" style="background:#0ea5e9">OTHERS</span>':'')+'</div>'+
       '<div class="cardBody"><b>'+esc(wo.component_name||'-')+'</b>'+(wo.unit_name?' · '+esc(wo.unit_name):'')+(wo.target_hours?' · Target: '+fmtJamMenit(wo.target_hours):'')+'<br>'+
       '📍 '+esc(locLabel(wo.location))+' · Kondisi: '+esc(wcLabel(wo.work_condition))+'</div>'+
       (wo.keterangan?'<div class="ket">📝 '+esc(wo.keterangan)+'</div>':'')+
-      (canFill?'<button class="big" onclick="openSubmitForm(\''+esc(String(wo.id))+'\')">✍️ Isi & Kirim</button>':'')+
+      timerControls+
+      (canFill?'<div style="display:flex;gap:6px;margin-top:10px">'+
+        '<button class="big" style="margin-top:0;flex:1" onclick="openSubmitForm(\''+esc(String(wo.id))+'\')">✍️ Isi & Kirim</button>'+
+        '<button class="big btnTransfer" style="margin-top:0;flex:1" onclick="openTransferModal(\''+esc(String(wo.id))+'\')">🔀 Transfer WO</button>'+
+        '</div>':'')+
       '</div>';
   });
   el.innerHTML=html;
@@ -740,31 +1042,53 @@ function queuedOpFor(woId){
   return null;
 }
 function queuedNote(qop){ return '<div class="obinfo">📮 '+esc(opLabel(qop))+' — menunggu sinyal (tombol dikunci)</div>'; }
-function teamStr(team){ return (team||[]).map(function(t){ return esc(t.name)+(t.email?' <span class="sub" style="display:inline;margin:0">('+esc(t.email)+')</span>':''); }).join(', '); }
+function teamStr(team){ return (team||[]).map(function(t){ return esc(t.name||t.mechanic_name||t.mechanic_id||t)+(t.email?' <span class="sub" style="display:inline;margin:0">('+esc(t.email)+')</span>':''); }).join(', '); }
 function ovBadges(wo){ return (wo.has_override_spv?'<span class="badge" style="background:#4338ca">SPV override</span>':'')+(wo.has_override_supt?'<span class="badge" style="background:#7c3aed">SUPT override</span>':''); }
 function cancelBtn(wo){ return '<button class="big secondary" onclick="openCancelForm(\''+esc(String(wo.id))+'\',\''+esc(String(wo.wo_number))+'\')">🗑 Batalkan WO</button>'; }
 function renderPendingList(){
   if (!S.pending.length) return '<div class="empty">Tidak ada WO menunggu approval.</div>';
   var html='<div class="sub">'+S.pending.length+' WO menunggu approval</div>';
   S.pending.forEach(function(wo){
+    var isTransfer = (wo.status === 'pending_transfer');
     var isL2 = wo.status==='pending_superintendent';
     var othersBadge = wo.is_others ? '<span class="badge" style="background:#0ea5e9">OTHERS</span>' : '';
     var tl = wo.timeliness;
     var tlBadge = tl ? '<span class="badge" style="background:'+(tl.status==='on_time'?'#15803d':tl.status==='late'?'#b45309':'#b91c1c')+'">⏱️ '+esc(tl.label)+' ×'+tl.factor+'</span>' : '';
-    html+='<div class="card"><div class="cardTop"><b>'+esc(wo.wo_number)+'</b><span class="badge" style="background:'+(isL2?'#b45309':'#7c3aed')+'">'+(isL2?'⏳ L2':'⏳ L1')+'</span>'+
+    var statusBadge = isTransfer
+      ? '<span class="badge" style="background:#4f46e5">🔀 Pending Transfer</span>'
+      : '<span class="badge" style="background:'+(isL2?'#b45309':'#7c3aed')+'">'+(isL2?'⏳ L2':'⏳ L1')+'</span>';
+
+    var transferInfo = isTransfer
+      ? '<br><b>🔀 Permintaan Transfer:</b>' +
+        (wo.transfer_requested_by_name || wo.transfer_requested_by ? '<br>Diminta oleh: ' + esc(wo.transfer_requested_by_name || wo.transfer_requested_by) : '') +
+        (wo.transfer_note ? '<br>Catatan: <i>' + esc(wo.transfer_note) + '</i>' : '')
+      : '';
+
+    html+='<div class="card"><div class="cardTop"><b>'+esc(wo.wo_number)+'</b>'+statusBadge+
       othersBadge+tlBadge+ovBadges(wo)+'</div>'+
       '<div class="cardBody"><b>'+esc(wo.component_name||'-')+'</b>'+(wo.unit_name?' · '+esc(wo.unit_name):'')+'<br>'+
       '📍 Lokasi: '+esc(locLabel(wo.location))+'<br>'+
-      'Kondisi: '+esc(wcLabel(wo.work_condition))+' · Aktual: '+fmtJamMenit(wo.actual_hours)+' · Target: '+fmtJamMenit(wo.target_hours)+'<br>'+
+      'Kondisi: '+esc(wcLabel(wo.work_condition))+' · Target: '+fmtJamMenit(wo.target_hours)+
+      (wo.actual_hours ? ' · Aktual: '+fmtJamMenit(wo.actual_hours) : '')+'<br>'+
       'Base: '+(wo.base_points||0)+' pts · Unit Factor: '+(wo.unit_factor||1)+' 🔒<br>'+
-      '🔧 Part: '+esc(partLabel(wo.part_type))+
-      (wo.hour_meter?' · HM: '+esc(wo.hour_meter):'')+(wo.kilometers?' · KM: '+esc(wo.kilometers):'')+
-      (wo.created_by_name?'<br>👤 Pembuat: '+esc(wo.created_by_name):'')+
-      (wo.submitted_by_name?'<br>✍️ Disubmit: '+esc(wo.submitted_by_name):'')+
-      '<br>👥 Tim: '+teamStr(wo.team)+'</div>'+
+      (wo.part_type ? '🔧 Part: '+esc(partLabel(wo.part_type))+'<br>' : '')+
+      (wo.created_by_name?'👤 Pembuat: '+esc(wo.created_by_name)+'<br>':'')+
+      (wo.submitted_by_name?'✍️ Disubmit: '+esc(wo.submitted_by_name)+'<br>':'')+
+      '👥 Tim: '+teamStr(wo.team)+
+      transferInfo +
+      '</div>'+
       (wo.keterangan?'<div class="ket">📝 '+esc(wo.keterangan)+'</div>':'')+
-      (function(){ var q=queuedOpFor(wo.id); return q ? queuedNote(q)
-        : '<button class="big" onclick="openApproveForm(\''+esc(String(wo.id))+'\')">📋 Review & Approve</button>'+cancelBtn(wo); })()+'</div>';
+      (function(){
+        var q=queuedOpFor(wo.id);
+        if (q) return queuedNote(q);
+        if (isTransfer) {
+          return '<div style="display:flex;gap:6px;margin-top:10px">'+
+            '<button class="big" style="margin-top:0;flex:1;background:#10b981" onclick="openApproveTransferModal(\''+esc(String(wo.id))+'\')">🔀 Setujui Transfer</button>'+
+            '<button class="big secondary" style="margin-top:0;flex:1;color:#dc2626;border-color:#fca5a5" onclick="queueRejectTransfer(\''+esc(String(wo.id))+'\')">❌ Tolak Transfer</button>'+
+            '</div>';
+        }
+        return '<button class="big" onclick="openApproveForm(\''+esc(String(wo.id))+'\')">📋 Review & Approve</button>'+cancelBtn(wo);
+      })()+'</div>';
   });
   return html;
 }
@@ -809,9 +1133,10 @@ function renderApprovedList(){
 window.addEventListener('online',function(){renderAll(); syncNow(false);});
 window.addEventListener('offline',renderAll);
 openDb().then(function() {
-  return Promise.all([kvGet('token'),kvGet('me'),kvGet('wos'),kvGet('refs'),kvGet('pending'),kvGet('last_sync'),kvGet('role'),kvGet('refs_at'),kvGet('active'),kvGet('approved')]);
+  return Promise.all([kvGet('token'),kvGet('me'),kvGet('wos'),kvGet('refs'),kvGet('pending'),kvGet('last_sync'),kvGet('role'),kvGet('refs_at'),kvGet('active'),kvGet('approved'),kvGet('timer_states')]);
 }).then(function(v) {
-  S.token=v[0]||null; S.me=v[1]||null; S.wos=v[2]||[]; S.refs=v[3]||null; S.pending=v[4]||[]; S.lastSync=v[5]||null; S.role=v[6]||'mechanic'; S.refsAt=v[7]||null; S.active=v[8]||[]; S.approved=v[9]||[];
+  S.token=v[0]||null; S.me=v[1]||null; S.wos=v[2]||[]; S.refs=v[3]||null; S.pending=v[4]||[]; S.lastSync=v[5]||null; S.role=v[6]||'mechanic'; S.refsAt=v[7]||null; S.active=v[8]||[]; S.approved=v[9]||[]; S.timerStates=v[10]||{};
+  startTimerTicker();
   return refreshOutbox();
 }).then(function() {
   if ('serviceWorker' in navigator) {

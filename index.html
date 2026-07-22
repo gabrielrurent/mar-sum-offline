@@ -66,6 +66,14 @@
     .chkRow{display:flex;align-items:center;gap:6px;margin:6px 0;font-size:13px;color:var(--text)}
     .chkRow input[type="checkbox"]{width:18px;height:18px;accent-color:var(--primary)}
     .ovBox{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:var(--radius-sm);padding:11px;margin:8px 0}
+    .timerPill{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:var(--radius-sm);padding:10px;text-align:center;margin:10px 0}
+    .timerClock{font-size:24px;font-weight:800;font-family:monospace;color:#1e40af}
+    .timerBtns{display:flex;gap:6px;justify-content:center;margin-top:8px;flex-wrap:wrap}
+    .timerBtn{padding:7px 14px;border-radius:8px;font-weight:700;font-size:13px;border:none;cursor:pointer}
+    .btnStart{background:#10b981;color:#fff}
+    .btnPause{background:#f59e0b;color:#fff}
+    .btnStop{background:#ef4444;color:#fff}
+    .btnTransfer{background:#4f46e5;color:#fff;width:100%;margin-top:6px}
   </style>
 </head>
 <body>
@@ -109,6 +117,18 @@
       <h2 id="fTitle">-</h2>
       <div class="desc" id="fDesc"></div>
       <div class="ket" id="fKet" style="display:none"></div>
+
+      <!-- LIVE TIMER WIDGET (Opsional — tidak menghapus bar manual) -->
+      <div class="timerPill" id="modalTimerPill">
+        <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:2px">⏱️ LIVE TIMER REKAM WAKTU</div>
+        <div class="timerClock" id="modalTimerDisplay">00:00:00</div>
+        <div class="timerBtns">
+          <button type="button" class="timerBtn btnStart" id="modalBtnStart" onclick="modalTimerStart()">▶ Start</button>
+          <button type="button" class="timerBtn btnPause" id="modalBtnPause" onclick="modalTimerPause()" style="display:none">⏸ Pause</button>
+          <button type="button" class="timerBtn btnStop" id="modalBtnStop" onclick="modalTimerStop()" style="display:none">⏹ Stop & Isi Jam</button>
+        </div>
+      </div>
+
       <div class="row2">
         <div><label>Jam Mulai *</label><input type="datetime-local" class="inp" id="fStart"></div>
         <div><label>Jam Selesai *</label><input type="datetime-local" class="inp" id="fEnd"></div>
@@ -207,6 +227,32 @@
         <button class="big danger" onclick="queueReject()">🚫 Kirim Reject</button>
       </div>
       <button class="big secondary" onclick="closeModal('approveModal')" style="margin-top:6px">Batal</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Request Transfer WO (Mekanik) -->
+  <div class="modal" id="transferModal">
+    <div class="sheet">
+      <h2>🔀 Transfer Work Order</h2>
+      <div class="desc" id="trDesc">-</div>
+      <div class="ket" style="margin-bottom:8px;background:#EFF6FF;color:#1E40AF">ℹ️ Jika timer live sedang berjalan, waktu akan otomatis dihentikan saat permintaan transfer dikirim.</div>
+      <label>Catatan Transfer (opsional)</label>
+      <input class="inp" id="trNote" placeholder="cth: belum selesai shift ini, minta dilanjut shift 2">
+      <button class="big" style="background:#4f46e5" onclick="queueRequestTransfer()">🚀 Kirim Permintaan Transfer</button>
+      <button class="big secondary" onclick="closeModal('transferModal')">Batal</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Approve Transfer WO (L1 pilih mekanik penerima) -->
+  <div class="modal" id="approveTransferModal">
+    <div class="sheet">
+      <h2>🔀 Setujui Transfer Work Order</h2>
+      <div class="desc" id="trAppDesc">-</div>
+      <label>Pilih Mekanik Penerima Transfer *</label>
+      <div id="trRecipientsList"></div>
+      <button type="button" class="mini gray" onclick="addTransferRecipientRow()" style="margin-bottom:10px">+ Tambah Mekanik Penerima</button>
+      <button class="big" style="background:#10b981" onclick="queueApproveTransfer()">✅ Setujui Transfer</button>
+      <button class="big secondary" onclick="closeModal('approveTransferModal')">Batal</button>
     </div>
   </div>
 
