@@ -903,7 +903,7 @@ function fmtDateTime(iso){
 function badgeFor(wo,pendingOp) {
   if (pendingOp) {
     if (pendingOp.status==='queued') return ['📮 Antre','#b45309'];
-    if (pendingOp.status==='failed') return ['❌ Ditolak','#b91c1c'];
+    if (pendingOp.status==='failed') return ['⚠️ Gagal Kirim','#b91c1c'];
   }
   var s=String(wo.status||'');
   if (s==='pending_mechanic_work') return ['📝 Perlu diisi','#1d4ed8'];
