@@ -79,44 +79,17 @@
     .splash-screen {
       position: fixed;
       inset: 0;
-      background: var(--bg);
+      background: #000000;
       display: flex;
-      flex-direction: column;
       align-items: center;
       justify-content: center;
       z-index: 9999;
       transition: opacity 0.5s ease, visibility 0.5s ease;
     }
     .splash-logo {
-      max-width: 160px;
-      height: auto;
-      object-fit: contain;
-      border-radius: 24px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-      animation: pulse-scale 2s infinite ease-in-out;
-    }
-    .splash-title {
-      font-size: 20px;
-      font-weight: 800;
-      color: var(--text);
-      margin-top: 20px;
-      letter-spacing: 0.05em;
-    }
-    .splash-loader {
-      width: 32px;
-      height: 32px;
-      border: 3px solid var(--bg-secondary);
-      border-top-color: var(--primary);
-      border-radius: 50%;
-      margin-top: 30px;
-      animation: spin 1s infinite linear;
-    }
-    @keyframes pulse-scale {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.04); }
-    }
-    @keyframes spin {
-      100% { transform: rotate(360deg); }
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
     .splash-hidden {
       opacity: 0;
@@ -128,9 +101,7 @@
 <body>
   <!-- SPLASH SCREEN -->
   <div class="splash-screen" id="splashScreen">
-    <img src="./foto.png" class="splash-logo" alt="Logo">
-    <div class="splash-title">MAR SUM</div>
-    <div class="splash-loader"></div>
+    <img src="./foto.png" class="splash-logo" alt="Splash Screen">
   </div>
 
   <div class="top">
