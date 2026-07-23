@@ -1021,11 +1021,22 @@ function fmtJamMenit(h){
   return m+' menit';
 }
 function renderApprovalTab(el) {
-  var subs = [['pending','✅ Pending',S.pending.length],['active','⏳ Aktif',S.active.length],['approved','🏆 Approved',S.approved.length]];
+  var filteredPending = S.pending;
+  if (S.role === 'supervisor') {
+    filteredPending = S.pending.filter(function(wo) {
+      return wo.status === 'pending_supervisor' || wo.status === 'pending_transfer';
+    });
+  } else if (S.role === 'superintendent') {
+    filteredPending = S.pending.filter(function(wo) {
+      return wo.status === 'pending_superintendent';
+    });
+  }
+
+  var subs = [['pending','✅ Pending',filteredPending.length],['active','⏳ Aktif',S.active.length],['approved','🏆 Approved',S.approved.length]];
   var bar = '<div class="tabBar" style="display:flex;margin-bottom:12px">'+subs.map(function(s){
     return '<button class="tab'+(S.appSub===s[0]?' active':'')+'" onclick="switchAppSub(\''+s[0]+'\')">'+s[1]+' ('+s[2]+')</button>';
   }).join('')+'</div>';
-  var body = S.appSub==='active' ? renderActiveList() : (S.appSub==='approved' ? renderApprovedList() : renderPendingList());
+  var body = S.appSub==='active' ? renderActiveList() : (S.appSub==='approved' ? renderApprovedList() : renderPendingList(filteredPending));
   el.innerHTML = bar + body;
 }
 function switchAppSub(sub){
@@ -1045,10 +1056,11 @@ function queuedNote(qop){ return '<div class="obinfo">📮 '+esc(opLabel(qop))+'
 function teamStr(team){ return (team||[]).map(function(t){ return esc(t.name||t.mechanic_name||t.mechanic_id||t)+(t.email?' <span class="sub" style="display:inline;margin:0">('+esc(t.email)+')</span>':''); }).join(', '); }
 function ovBadges(wo){ return (wo.has_override_spv?'<span class="badge" style="background:#4338ca">SPV override</span>':'')+(wo.has_override_supt?'<span class="badge" style="background:#7c3aed">SUPT override</span>':''); }
 function cancelBtn(wo){ return '<button class="big secondary" onclick="openCancelForm(\''+esc(String(wo.id))+'\',\''+esc(String(wo.wo_number))+'\')">🗑 Batalkan WO</button>'; }
-function renderPendingList(){
-  if (!S.pending.length) return '<div class="empty">Tidak ada WO menunggu approval.</div>';
-  var html='<div class="sub">'+S.pending.length+' WO menunggu approval</div>';
-  S.pending.forEach(function(wo){
+function renderPendingList(list){
+  var pendingList = list || S.pending;
+  if (!pendingList.length) return '<div class="empty">Tidak ada WO menunggu approval.</div>';
+  var html='<div class="sub">'+pendingList.length+' WO menunggu approval</div>';
+  pendingList.forEach(function(wo){
     var isTransfer = (wo.status === 'pending_transfer');
     var isL2 = wo.status==='pending_superintendent';
     var othersBadge = wo.is_others ? '<span class="badge" style="background:#0ea5e9">OTHERS</span>' : '';
