@@ -5,10 +5,13 @@ self.addEventListener('install', function(e) {
   self.skipWaiting();
 });
 self.addEventListener('activate', function(e) {
-  e.waitUntil(caches.keys().then(function(keys){
-    return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));
-  }));
-  self.clients.claim();
+  e.waitUntil(
+    caches.keys().then(function(keys){
+      return Promise.all(keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));
+    }).then(function() {
+      return self.clients.claim();
+    })
+  );
 });
 /* ── Background Sync: kirim antrean walau app sudah ditutup ──
    Saat sinyal kembali, Chrome membangunkan SW ini → flush outbox dari
