@@ -969,7 +969,7 @@ function renderWos(el) {
   var html='';
   S.wos.forEach(function(wo) {
     var op=opByWo[wo.id]; var b=badgeFor(wo,op);
-    var canFill=String(wo.status)==='pending_mechanic_work'&&(!op||op.status==='failed');
+    var canFill=String(wo.status)==='pending_mechanic_work'&&(!op||op.status==='failed'||op.status==='done');
 
     // Live Timer Widget
     var st = getTimerState(wo.id);
