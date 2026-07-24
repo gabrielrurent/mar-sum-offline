@@ -189,7 +189,7 @@ function kvSet(k,v) { return idbReq('kv','readwrite',function(s){return s.put(v,
 function obAll() { return idbReq('outbox','readonly',function(s){return s.getAll();}); }
 function obPut(item) { return idbReq('outbox','readwrite',function(s){return s.put(item);}); }
 function obDel(opId) { return idbReq('outbox','readwrite',function(s){return s.delete(opId);}); }
-function uuid() { return crypto.randomUUID ? crypto.randomUUID() : 'op-'+Date.now()+'-'+Math.random().toString(36).slice(2,10); }
+function uuid() { return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'op-' + Date.now() + '-' + Math.random().toString(36).slice(2,10); }
 
 /* ── API ── */
 function api(action,data,opId) {
