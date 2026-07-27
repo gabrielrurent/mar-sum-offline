@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v7'; // samakan dgn CACHE 'mar-sum-v7' di sw.js tiap rilis
+var APP_VERSION = 'sum-v8'; // samakan dgn CACHE 'mar-sum-v8' di sw.js tiap rilis
 var S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -1084,8 +1084,8 @@ function renderPendingList(list){
       (wo.actual_hours ? ' · Aktual: '+fmtJamMenit(wo.actual_hours) : '')+'<br>'+
       'Base: '+(wo.base_points||0)+' pts · Unit Factor: '+(wo.unit_factor||1)+' 🔒<br>'+
       (wo.part_type ? '🔧 Part: '+esc(partLabel(wo.part_type))+'<br>' : '')+
-      (wo.created_by_name?'👤 Pembuat: '+esc(wo.created_by_name)+'<br>':'')+
-      (wo.submitted_by_name?'✍️ Disubmit: '+esc(wo.submitted_by_name)+'<br>':'')+
+      ((wo.created_by_name||wo.created_by)?'👤 Pembuat: '+esc(wo.created_by_name||wo.created_by)+'<br>':'')+
+      ((wo.submitted_by_name||wo.submitted_by)?'✍️ Disubmit: '+esc(wo.submitted_by_name||wo.submitted_by)+'<br>':'')+
       '👥 Tim: '+teamStr(wo.team)+
       transferInfo +
       '</div>'+
