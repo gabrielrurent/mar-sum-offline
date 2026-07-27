@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v8'; // samakan dgn CACHE 'mar-sum-v8' di sw.js tiap rilis
+var APP_VERSION = 'sum-v9'; // samakan dgn CACHE 'mar-sum-v9' di sw.js tiap rilis
 var S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -599,6 +599,26 @@ function queueReopenExpired(woId) {
   });
 }
 
+function queueReportExpired(woId) {
+  var wo = null;
+  for (var i = 0; i < S.wos.length; i++) {
+    if (String(S.wos[i].id) === String(woId)) wo = S.wos[i];
+  }
+  var op = {
+    op_id: uuid(), seq: (_enqSeq++), action: 'report_expired', wo_id: woId, wo_number: wo ? wo.wo_number : woId,
+    payload: { wo_id: woId },
+    status: 'queued', created_at: new Date().toISOString(), label: 'Lapor Expired ' + (wo ? wo.wo_number : woId)
+  };
+
+  if (wo) wo.is_reported_expired = true;
+
+  obPut(op).then(refreshOutbox).then(function() {
+    renderAll();
+    toast(navigator.onLine ? '📮 Laporan WO expired dikirim...' : '📮 Laporan WO expired tersimpan!');
+    syncNow(false);
+  });
+}
+
 /* ── Create WO form (SUM: component/unit/kondisi/others/team) ── */
 function openCreateForm() {
   if (!S.refs) {
@@ -907,7 +927,7 @@ function toast(msg) {
 }
 function toggleOutboxDetail(){ S.showOutbox = !S.showOutbox; renderAll(); }
 function opLabel(o){
-  var names = {submit_work:'Submit', create_wo:'Buat WO', approve_l1:'L1', approve_l2:'L2', reject:'Reject', save_override:'Override', cancel_wo:'Batal', request_transfer:'Transfer WO', approve_transfer:'Approve Transfer', reject_transfer:'Reject Transfer'};
+  var names = {submit_work:'Submit', create_wo:'Buat WO', approve_l1:'L1', approve_l2:'L2', reject:'Reject', save_override:'Override', cancel_wo:'Batal', request_transfer:'Transfer WO', approve_transfer:'Approve Transfer', reject_transfer:'Reject Transfer', report_expired:'Lapor Expired', reopen_expired:'Reopen Expired'};
   var base = o.label || names[o.action] || o.action;
   if (o.wo_number && String(base).indexOf(o.wo_number)===-1) base += ' '+o.wo_number;
   return base;
@@ -987,13 +1007,20 @@ function renderWos(el) {
   var html='';
   S.wos.forEach(function(wo) {
     var op=opByWo[wo.id]; var b=badgeFor(wo,op);
-    var canFill=String(wo.status)==='pending_mechanic_work'&&(!op||op.status==='failed'||op.status==='done');
+    var isReportedExp = (wo.is_reported_expired === true);
+    var refTime = wo.reopened_at || wo.created_at;
+    var isExpiredTime = false;
+    if (refTime) {
+      var t = new Date(refTime).getTime();
+      if (!isNaN(t) && (Date.now() - t > 12 * 60 * 60 * 1000)) isExpiredTime = true;
+    }
+    var canFill=String(wo.status)==='pending_mechanic_work'&&!isReportedExp&&(!op||op.status==='failed'||op.status==='done');
 
     // Live Timer Widget
     var st = getTimerState(wo.id);
     var curMs = st.elapsed_ms + (st.state === 'running' ? (Date.now() - st.start_epoch) : 0);
     var timerControls = '';
-    if (canFill) {
+    if (canFill && !isExpiredTime) {
       var isRunning = (st.state === 'running');
       var isPaused = (st.state === 'paused');
       timerControls = '<div class="timerPill">' +
@@ -1007,13 +1034,23 @@ function renderWos(el) {
       '</div>';
     }
 
-    html+='<div class="card"><div class="cardTop"><b>'+esc(wo.wo_number)+'</b><span class="badge" style="background:'+b[1]+'">'+b[0]+'</span>'+
+    var expiredNotice = '';
+    if (isReportedExp) {
+      expiredNotice = '<div class="ket" style="background:#FEF2F2;color:#991B1B;margin-top:8px">⏰ WO ini telah dilaporkan expired ke L2. Mohon tunggu L2 me-reopen WO ini.</div>';
+    } else if (isExpiredTime && canFill) {
+      expiredNotice = '<div class="ket" style="background:#FEF2F2;color:#991B1B;margin-top:8px">⚠️ WO ini telah expired (>12 jam). Silakan laporkan ke Pengawas (L2) untuk dibuka kembali.</div>' +
+        '<button class="big danger" style="margin-top:8px" onclick="queueReportExpired(\'' + esc(String(wo.id)) + '\')">⚠️ Laporkan Expired ke L2</button>';
+    }
+
+    html+='<div class="card"><div class="cardTop"><b>'+esc(wo.wo_number)+'</b>'+
+      (isReportedExp ? '<span class="badge" style="background:#dc2626">⏰ Expired Reported</span>' : (isExpiredTime ? '<span class="badge" style="background:#dc2626">⏰ Expired (>12j)</span>' : '<span class="badge" style="background:'+b[1]+'">'+b[0]+'</span>'))+
       (wo.is_others?'<span class="badge" style="background:#0ea5e9">OTHERS</span>':'')+'</div>'+
       '<div class="cardBody"><b>'+esc(wo.component_name||'-')+'</b>'+(wo.unit_name?' · '+esc(wo.unit_name):'')+(wo.target_hours?' · Target: '+fmtJamMenit(wo.target_hours):'')+'<br>'+
       '📍 '+esc(locLabel(wo.location))+' · Kondisi: '+esc(wcLabel(wo.work_condition))+'</div>'+
       (wo.keterangan?'<div class="ket">📝 '+esc(wo.keterangan)+'</div>':'')+
       timerControls+
-      (canFill?'<div style="display:flex;gap:6px;margin-top:10px">'+
+      expiredNotice+
+      (canFill && !isExpiredTime ?'<div style="display:flex;gap:6px;margin-top:10px">'+
         '<button class="big" style="margin-top:0;flex:1" onclick="openSubmitForm(\''+esc(String(wo.id))+'\')">✍️ Isi & Kirim</button>'+
         '<button class="big btnTransfer" style="margin-top:0;flex:1" onclick="openTransferModal(\''+esc(String(wo.id))+'\')">🔀 Transfer WO</button>'+
         '</div>':'')+
