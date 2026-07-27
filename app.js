@@ -581,6 +581,24 @@ function queueRejectTransfer(woId) {
   });
 }
 
+function queueReopenExpired(woId) {
+  var wo = null;
+  for (var i = 0; i < S.pending.length; i++) {
+    if (String(S.pending[i].id) === String(woId)) wo = S.pending[i];
+  }
+  var op = {
+    op_id: uuid(), seq: (_enqSeq++), action: 'reopen_expired', wo_id: woId, wo_number: wo ? wo.wo_number : woId,
+    payload: { wo_id: woId },
+    status: 'queued', created_at: new Date().toISOString(), label: 'Reopen Expired ' + (wo ? wo.wo_number : woId)
+  };
+
+  obPut(op).then(refreshOutbox).then(function() {
+    renderAll();
+    toast(navigator.onLine ? '📮 Reopen expired dikirim...' : '📮 Reopen expired tersimpan!');
+    syncNow(false);
+  });
+}
+
 /* ── Create WO form (SUM: component/unit/kondisi/others/team) ── */
 function openCreateForm() {
   if (!S.refs) {
@@ -1024,11 +1042,11 @@ function renderApprovalTab(el) {
   var filteredPending = S.pending;
   if (S.role === 'supervisor') {
     filteredPending = S.pending.filter(function(wo) {
-      return wo.status === 'pending_supervisor' || wo.status === 'pending_transfer';
+      return wo.status === 'pending_supervisor' || wo.status === 'pending_transfer' || wo.is_reported_expired === true;
     });
   } else if (S.role === 'superintendent') {
     filteredPending = S.pending.filter(function(wo) {
-      return wo.status === 'pending_superintendent';
+      return wo.status === 'pending_superintendent' || wo.is_reported_expired === true;
     });
   }
 
@@ -1062,13 +1080,16 @@ function renderPendingList(list){
   var html='<div class="sub">'+pendingList.length+' WO menunggu approval</div>';
   pendingList.forEach(function(wo){
     var isTransfer = (wo.status === 'pending_transfer');
+    var isExpiredReported = (wo.is_reported_expired === true);
     var isL2 = wo.status==='pending_superintendent';
     var othersBadge = wo.is_others ? '<span class="badge" style="background:#0ea5e9">OTHERS</span>' : '';
     var tl = wo.timeliness;
     var tlBadge = tl ? '<span class="badge" style="background:'+(tl.status==='on_time'?'#15803d':tl.status==='late'?'#b45309':'#b91c1c')+'">⏱️ '+esc(tl.label)+' ×'+tl.factor+'</span>' : '';
-    var statusBadge = isTransfer
-      ? '<span class="badge" style="background:#4f46e5">🔀 Pending Transfer</span>'
-      : '<span class="badge" style="background:'+(isL2?'#b45309':'#7c3aed')+'">'+(isL2?'⏳ L2':'⏳ L1')+'</span>';
+    var statusBadge = isExpiredReported
+      ? '<span class="badge" style="background:#dc2626">⏰ Expired Reported</span>'
+      : (isTransfer
+        ? '<span class="badge" style="background:#4f46e5">🔀 Pending Transfer</span>'
+        : '<span class="badge" style="background:'+(isL2?'#b45309':'#7c3aed')+'">'+(isL2?'⏳ L2':'⏳ L1')+'</span>');
 
     var transferInfo = isTransfer
       ? '<br><b>🔀 Permintaan Transfer:</b>' +
@@ -1093,6 +1114,9 @@ function renderPendingList(list){
       (function(){
         var q=queuedOpFor(wo.id);
         if (q) return queuedNote(q);
+        if (isExpiredReported) {
+          return '<button class="big" style="background:#0284c7" onclick="queueReopenExpired(\''+esc(String(wo.id))+'\')">🔓 Buka Kembali (Re-open WO)</button>';
+        }
         if (isTransfer) {
           return '<div style="display:flex;gap:6px;margin-top:10px">'+
             '<button class="big" style="margin-top:0;flex:1;background:#10b981" onclick="openApproveTransferModal(\''+esc(String(wo.id))+'\')">🔀 Setujui Transfer</button>'+
