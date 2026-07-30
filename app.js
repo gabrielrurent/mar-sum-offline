@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v15'; // samakan dgn CACHE 'mar-sum-v15' di sw.js tiap rilis
+var APP_VERSION = 'sum-v16'; // samakan dgn CACHE 'mar-sum-v16' di sw.js tiap rilis
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -255,10 +255,25 @@ function obDel(opId) { return idbReq('outbox','readwrite',function(s){return s.d
 function uuid() { return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'op-' + Date.now() + '-' + Math.random().toString(36).slice(2,10); }
 
 /* ── API ── */
+/** Token dicabut/kadaluwarsa di server → kembalikan user ke layar login. */
+function handleTokenRejected() {
+  toast('🔒 Token tidak berlaku lagi — silakan masuk ulang');
+  S.token = null;
+  kvSet('token', null);
+  setLoginLoading(false);
+  showScreen('login');
+}
+
 function api(action,data,opId) {
   var body = JSON.stringify({token:S.token, action:action, data:data||{}, op_id:opId||undefined});
   return fetch(CONFIG.API_URL, {method:'POST', headers:{'Content-Type':'text/plain'}, body:body})
-    .then(function(r){return r.json();});
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if (j && j.success === false && typeof j.error === 'string' && /token tidak dikenal|token tidak berlaku|nonaktif/i.test(j.error)) {
+        handleTokenRejected();
+      }
+      return j;
+    });
 }
 
 /* ── Install PWA ── */
@@ -376,6 +391,7 @@ function syncNow(manual) {
       else {
         // approver (L1/L2) perlu antrean approval + aktif; foreman cukup refs utk Buat WO
         if (S.role === 'supervisor' || S.role === 'superintendent' || S.role === 'foreman_approver') { tasks.push(pullPending()); tasks.push(pullActive()); }
+        else if (S.role === 'foreman') { tasks.push(pullActive()); }   // foreman: pantau WO aktif
         if (refsStale()) tasks.push(pullRefs());
       }
       return Promise.all(tasks);
@@ -536,10 +552,12 @@ function queueSubmit() {
   var op = { op_id:uuid(), seq:(_enqSeq++), action:'submit_work', wo_id:activeWo.id, wo_number:activeWo.wo_number,
     payload:{wo_id:activeWo.id, start_time:new Date(st).toISOString(), end_time:new Date(en).toISOString(), hour_meter:hm, kilometers:km, part_type:part},
     status:'queued', created_at:new Date().toISOString() };
+  // Umpan balik SEKETIKA — jangan tunggu IndexedDB/jaringan, supaya layar tak terasa "stuck".
+  closeModal('submitModal');
+  toast(navigator.onLine ? '📤 Mengirim…' : '📴 Tersimpan — terkirim otomatis saat ada sinyal');
   obPut(op).then(refreshOutbox).then(function() {
     clearTimerAfterSubmit(op.wo_id);   // waktu baru dihapus SETELAH masuk antrean
-    closeModal('submitModal'); renderAll();
-    toast(navigator.onLine?'📮 Mengirim...':'📮 Mengirim…');
+    renderAll();
     syncNow(false);
   });
 }
@@ -1162,7 +1180,7 @@ function renderAll() {
   var on=navigator.onLine;
   document.getElementById('netDot').style.background=on?'#22c55e':'#ef4444';
   document.getElementById('netText').textContent=on?'Online':'Offline';
-  document.getElementById('syncBtn').textContent=S.syncing?'⏳':'🔄 Sync';
+  document.getElementById('syncBtn').innerHTML = S.syncing ? '<span class="spin"></span>Sync…' : '🔄 Sync';
   document.getElementById('lastSync').textContent=(S.lastSync?'Sync: '+new Date(S.lastSync).toLocaleString('id-ID'):'Belum sync')+' · '+APP_VERSION;
   document.getElementById('meName').textContent=S.me?(S.me.name||S.me.mechanic_id):'';
   // Peran → tab: mekanik=WO Saya; foreman=Buat WO; L1/L2=Buat WO + Approval
@@ -1186,6 +1204,11 @@ function renderAll() {
   }
   document.getElementById('tabWos').style.display = 'none'; // WO Saya hanya mekanik (tanpa tabBar)
   document.getElementById('tabCreate').style.display = isCreator ? '' : 'none';
+  var tActive = document.getElementById('tabActive');
+  if (tActive) {
+    tActive.style.display = isCreator ? '' : 'none';
+    tActive.className = 'tab' + (S.tab === 'active' ? ' active' : '');
+  }
   document.getElementById('tabApproval').style.display = isApprover ? '' : 'none';
   document.getElementById('tabCreate').className = 'tab'+(S.tab==='create'?' active':'');
   document.getElementById('tabApproval').className = 'tab'+(S.tab==='approval'?' active':'');
@@ -1214,6 +1237,7 @@ function renderAll() {
   // content
   var content = document.getElementById('content');
   if (isMechanic) { renderWos(content); }
+  else if (S.tab==='active') { content.innerHTML = '<div class="sub">WO yang sudah dibuat tapi belum di-submit mekanik</div>' + renderActiveList(); }
   else if (S.tab==='approval' && isApprover) { renderApprovalTab(content); }
   else { renderCreateTab(content); }
 }
