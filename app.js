@@ -6,8 +6,8 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v13'; // samakan dgn CACHE 'mar-sum-v13' di sw.js tiap rilis
-var S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
+var APP_VERSION = 'sum-v14'; // samakan dgn CACHE 'mar-sum-v14' di sw.js tiap rilis
+var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
 function refsStale() { return !S.refs || !S.refsAt || (Date.now() - new Date(S.refsAt).getTime() > REFS_TTL_MS); }
@@ -351,7 +351,7 @@ function requestBgSync() {
 function syncNow(manual) {
   if (S.syncing) return Promise.resolve();
   if (manual) requestNotifPermission();
-  if (!navigator.onLine) { requestBgSync(); if (manual) toast('📴 Offline — data aman di antrean, terkirim otomatis saat ada sinyal'); renderAll(); return Promise.resolve(); }
+  if (!navigator.onLine) { requestBgSync(); if (manual) toast('📴 Offline — tersimpan, Mengirim… otomatis saat ada sinyal'); renderAll(); return Promise.resolve(); }
   S.syncing = true; renderAll();
   return flushOutbox()
     .then(function(sent) {
@@ -436,11 +436,18 @@ function pullApproved() {
 function refreshOutbox() { return obAll().then(function(o){S.outbox=o||[];}); }
 
 /* ── Login ── */
+function setLoginLoading(on) {
+  var b = document.getElementById('btnLogin'), l = document.getElementById('loginLoading');
+  if (b) { b.disabled = !!on; b.textContent = on ? 'Memeriksa…' : 'Masuk'; }
+  if (l) l.style.display = on ? 'block' : 'none';
+}
+
 function doLogin() {
   var t = document.getElementById('tokenInput').value.trim();
   if (!t) { toast('Isi token dulu'); return; }
   requestNotifPermission(); requestPeriodicSync();
   S.token = t;
+  setLoginLoading(true);
   if (navigator.onLine) {
     api('ping').then(function(r) {
       if (r.success) {
@@ -453,9 +460,9 @@ function doLogin() {
             if (S.role !== 'mechanic') return pullRefs().catch(function(){});
           })
           .then(function() { showScreen('main'); syncNow(false); });
-      } else { toast('❌ '+(r.error||'Token ditolak')); S.token=null; }
-    }).catch(function() { saveTokenOffline(t); });
-  } else { saveTokenOffline(t); }
+      } else { setLoginLoading(false); toast('❌ '+(r.error||'Token ditolak')); S.token=null; }
+    }).catch(function() { setLoginLoading(false); saveTokenOffline(t); });
+  } else { setLoginLoading(false); saveTokenOffline(t); }
 }
 function saveTokenOffline(t) {
   kvSet('token',t).then(function() { toast('📴 Token disimpan — verifikasi saat ada sinyal'); showScreen('main'); renderAll(); });
@@ -514,7 +521,7 @@ function queueSubmit() {
   obPut(op).then(refreshOutbox).then(function() {
     clearTimerAfterSubmit(op.wo_id);   // waktu baru dihapus SETELAH masuk antrean
     closeModal('submitModal'); renderAll();
-    toast(navigator.onLine?'📮 Mengirim...':'📮 Tersimpan! Terkirim saat ada sinyal');
+    toast(navigator.onLine?'📮 Mengirim...':'📮 Mengirim…');
     syncNow(false);
   });
 }
@@ -849,7 +856,7 @@ function queueCreate(keepOpen) {
       toast('📮 WO diantre — isi WO berikutnya (kondisi & lokasi dipertahankan)');
     } else {
       closeModal('createModal');
-      toast(navigator.onLine?'📮 Mengirim...':'📮 Tersimpan! Terkirim saat ada sinyal');
+      toast(navigator.onLine?'📮 Mengirim...':'📮 Mengirim…');
     }
     syncNow(false);
   });
@@ -923,6 +930,8 @@ function openApproveForm(woId) {
   var _actNow = document.getElementById('aOvActualNow');
   if (_actNow) _actNow.value = a.actual_hours ? fmtJamMenit(a.actual_hours) : '-';
   aOvHitungDurasi();
+  var _ovB = document.getElementById('ovBody'); if (_ovB) _ovB.style.display = 'none';
+  var _ovA = document.getElementById('ovArrow'); if (_ovA) _ovA.textContent = '▸';
   renderOverrideLog(a);                        // riwayat override (siapa & apa)
   aOvRenderTeam(a.team || []); // editor tim override — prefilled tim saat ini
   document.getElementById('aReason').value='';
@@ -981,6 +990,15 @@ function toDtLocal(v) {
 }
 
 /** Render riwayat override (siapa mengubah apa) di modal approval. */
+/** Buka/tutup panel Override (default tertutup supaya tampilan approval rapi). */
+function toggleOverride() {
+  var b = document.getElementById('ovBody'), a = document.getElementById('ovArrow');
+  if (!b) return;
+  var open = b.style.display !== 'none';
+  b.style.display = open ? 'none' : 'block';
+  if (a) a.textContent = open ? '▸' : '▾';
+}
+
 function renderOverrideLog(wo) {
   var box = document.getElementById('aOvLog');
   if (!box) return;
@@ -1085,6 +1103,9 @@ function closeModal(id) { document.getElementById(id).style.display='none'; }
 
 /* ── Render ── */
 function showScreen(nm) {
+  var lv = document.getElementById('loginVersion');
+  if (lv) lv.textContent = APP_VERSION;
+  if (nm !== 'login') setLoginLoading(false);
   document.getElementById('screen-login').style.display = nm==='login'?'block':'none';
   document.getElementById('screen-main').style.display = nm==='main'?'block':'none';
 }
@@ -1135,6 +1156,16 @@ function renderAll() {
   else if (isForeman && S.tab!=='create') S.tab='create';
   else if (isApprover && S.tab==='wos') S.tab='approval';
   document.getElementById('tabBar').style.display = isCreator ? 'flex' : 'none';
+  // Tab khusus mekanik: Assigned | Pending | Done
+  var mtb = document.getElementById('mechTabBar');
+  if (mtb) {
+    mtb.style.display = isMechanic ? 'flex' : 'none';
+    var mm = {assigned:'mtabAssigned', pending:'mtabPending', done:'mtabDone'};
+    for (var mk in mm) {
+      var mel = document.getElementById(mm[mk]);
+      if (mel) mel.className = 'tab' + (S.mechTab === mk ? ' active' : '');
+    }
+  }
   document.getElementById('tabWos').style.display = 'none'; // WO Saya hanya mekanik (tanpa tabBar)
   document.getElementById('tabCreate').style.display = isCreator ? '' : 'none';
   document.getElementById('tabApproval').style.display = isApprover ? '' : 'none';
@@ -1143,7 +1174,7 @@ function renderAll() {
   // outbox info
   var queued = S.outbox.filter(function(o){return o.status==='queued'||o.status==='failed_retry';});
   var oi = document.getElementById('outboxInfo');
-  oi.textContent = queued.length ? ('📮 '+queued.length+' menunggu sinyal '+(S.showOutbox?'▲':'▼')) : '';
+  oi.textContent = queued.length ? ('📮 '+queued.length+' Mengirim… '+(S.showOutbox?'▲':'▼')) : '';
   var od = document.getElementById('outboxDetail');
   if (queued.length && S.showOutbox) {
     od.style.display='block';
@@ -1168,12 +1199,33 @@ function renderAll() {
   else if (S.tab==='approval' && isApprover) { renderApprovalTab(content); }
   else { renderCreateTab(content); }
 }
+/** Tab mekanik: Assigned | Pending | Done */
+function switchMechTab(t) { S.mechTab = t; renderAll(); }
+
+/** Kelompokkan status WO ke tab mekanik. */
+function mechGroupOf(wo) {
+  var st = String(wo.status || '');
+  if (st === 'approved') return 'done';
+  if (st === 'rejected' || st === 'cancelled') return 'done';
+  if (st === 'pending_supervisor' || st === 'pending_superintendent') return 'pending';
+  return 'assigned';   // pending_mechanic_work / in_progress / pending_transfer / created
+}
+
 function renderWos(el) {
   var opByWo={};
   S.outbox.forEach(function(o){if(o.wo_id&&(!opByWo[o.wo_id]||o.created_at>opByWo[o.wo_id].created_at))opByWo[o.wo_id]=o;});
   if (!S.wos.length) { el.innerHTML='<div class="empty">Belum ada kartu WO.<br>Tekan 🔄 Sync saat ada sinyal.</div>'; return; }
+  // Filter sesuai tab mekanik (Assigned / Pending / Done)
+  var listWos = S.wos.filter(function(w){ return mechGroupOf(w) === S.mechTab; });
+  if (!listWos.length) {
+    var lbl = S.mechTab==='assigned' ? 'Belum ada WO yang perlu dikerjakan.'
+            : S.mechTab==='pending'  ? 'Tidak ada WO yang sedang menunggu approval.'
+            : 'Belum ada WO selesai.';
+    el.innerHTML = '<div class="empty">'+lbl+'</div>';
+    return;
+  }
   var html='';
-  S.wos.forEach(function(wo) {
+  listWos.forEach(function(wo) {
     var op=opByWo[wo.id]; var b=badgeFor(wo,op);
     var isReportedExp = (wo.is_reported_expired === true);
     var refTime = wo.reopened_at || wo.created_at;
@@ -1214,8 +1266,17 @@ function renderWos(el) {
       (isReportedExp ? '<span class="badge" style="background:#dc2626">⏰ Expired Reported</span>' : (isExpiredTime ? '<span class="badge" style="background:#dc2626">⏰ Expired (>12j)</span>' : '<span class="badge" style="background:'+b[1]+'">'+b[0]+'</span>'))+
       (wo.is_others?'<span class="badge" style="background:#0ea5e9">OTHERS</span>':'')+'</div>'+
       '<div class="cardBody"><b>'+esc(wo.component_name||'-')+'</b>'+(wo.unit_name?' · '+esc(wo.unit_name):'')+(wo.target_hours?' · Target: '+fmtJamMenit(wo.target_hours):'')+'<br>'+
-      '📍 '+esc(locLabel(wo.location))+' · Kondisi: '+esc(wcLabel(wo.work_condition))+'</div>'+
+      '📍 '+esc(locLabel(wo.location))+' · Kondisi: '+esc(wcLabel(wo.work_condition))+
+      (wo.created_at?'<br>📅 Dibuat: '+esc(fmtDateTime(wo.created_at)):'')+
+      ((parseFloat(wo.partial_hours)||0)>0?'<br>📥 Lintas shift: '+wo.partial_hours+' jam dari shift sebelumnya':'')+'</div>'+
       (wo.keterangan?'<div class="ket">📝 '+esc(wo.keterangan)+'</div>':'')+
+      // Hasil akhir (tab Done): poin & rupiah yang didapat mekanik ini
+      (String(wo.status)==='approved'
+        ? '<div style="margin-top:8px;background:#ECFDF5;border:1px solid #A7F3D0;border-radius:10px;padding:9px 11px;font-size:13px;color:#065F46;font-weight:800">'+
+          '🏆 '+(wo.my_points||0)+' poin · Rp '+fmtIdr(wo.my_idr||0)+
+          (wo.safety_incident?'<div style="font-weight:700;font-size:11px;color:#B91C1C;margin-top:3px">⚠️ Safety incident — poin 0</div>':'')+
+          '</div>'
+        : '')+
       timerControls+
       expiredNotice+
       (canFill && !isExpiredTime ?'<div style="display:flex;gap:6px;margin-top:10px">'+

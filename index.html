@@ -53,6 +53,10 @@
     .inp:focus,select:focus,input:focus{border-color:var(--primary);box-shadow:var(--focus-ring);outline:none}
     label{font-size:12px;color:var(--text-secondary);font-weight:600}
     .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    @media (max-width:520px){.row2{grid-template-columns:1fr}}
+    input[type="datetime-local"]{width:100%;min-width:0;font-size:14px;padding:10px 8px;appearance:none;-webkit-appearance:none}
+    .spin{display:inline-block;width:13px;height:13px;border:2px solid #BFDBFE;border-top-color:#1e40af;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:5px}
+    @keyframes sp{to{transform:rotate(360deg)}}
     .teamRow{display:flex;gap:6px;align-items:center;margin-bottom:6px}
     .teamRow select{flex:1}
     .obinfo{font-size:12px;color:#B45309;font-weight:700;margin-bottom:6px}
@@ -128,10 +132,11 @@
   <!-- LOGIN -->
   <div class="wrap" id="screen-login" style="display:none">
     <div class="panel">
-      <h2 style="color:#111827;font-size:16px;margin-bottom:4px">Masukkan Token</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px"><h2 style="color:#111827;font-size:16px">Masukkan Token</h2><span id="loginVersion" style="font-size:11px;font-weight:700;color:#6B7280;background:var(--bg-secondary);border:1px solid var(--border);border-radius:99px;padding:3px 9px">-</span></div>
       <p class="sub">Token dari admin, cukup diisi SEKALI.</p>
       <input class="inp" id="tokenInput" placeholder="token..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
-      <button class="big" onclick="doLogin()">Masuk</button>
+      <button class="big" id="btnLogin" onclick="doLogin()">Masuk</button>
+      <div id="loginLoading" style="display:none;margin-top:10px;text-align:center;font-size:13px;font-weight:700;color:#1e40af"><span class="spin"></span> Memeriksa token…</div>
     </div>
   </div>
 
@@ -144,6 +149,12 @@
     <div class="obinfo" id="outboxInfo" onclick="toggleOutboxDetail()" style="cursor:pointer"></div>
     <div id="outboxDetail" style="display:none;margin-bottom:8px"></div>
     <div id="failedOps"></div>
+    <!-- Tab khusus MEKANIK: Assigned | Pending | Done -->
+    <div class="tabBar" id="mechTabBar" style="display:none">
+      <button class="tab active" id="mtabAssigned" onclick="switchMechTab('assigned')">📋 Assigned</button>
+      <button class="tab" id="mtabPending" onclick="switchMechTab('pending')">⏳ Pending</button>
+      <button class="tab" id="mtabDone" onclick="switchMechTab('done')">✅ Done</button>
+    </div>
     <div class="tabBar" id="tabBar">
       <button class="tab active" id="tabWos" onclick="switchTab('wos')">📋 WO Saya</button>
       <button class="tab" id="tabCreate" onclick="switchTab('create')">➕ Buat WO</button>
@@ -186,7 +197,7 @@
       <label>Jenis Part *</label>
       <select class="inp" id="fPart"><option value="">-- Pilih Jenis Part --</option><option value="baru">🆕 Baru</option><option value="repair">🔧 Repair</option><option value="canibal">♻️ Canibal</option></select>
       <button class="big" onclick="queueSubmit()">📮 Simpan & Antre</button>
-      <button class="big secondary" onclick="closeModal('submitModal')">Batal</button>
+      <button class="big secondary" onclick="closeModal('submitModal')">← Kembali</button>
     </div>
   </div>
 
@@ -251,7 +262,11 @@
 
       <!-- OVERRIDE base_points / target_hours / TIM (parity dgn web) -->
       <div class="ovBox">
-        <div class="sub" style="margin:0 0 6px;font-weight:700;color:#1e40af">✏️ Override (opsional)</div>
+        <div onclick="toggleOverride()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none">
+          <div class="sub" style="margin:0;font-weight:700;color:#1e40af">✏️ Override (opsional)</div>
+          <span id="ovArrow" style="font-size:14px;color:#1e40af;font-weight:800">▸</span>
+        </div>
+        <div id="ovBody" style="display:none;margin-top:9px">
         <div class="row2">
           <div><label>Base Points</label><input type="number" class="inp" id="aOvBp" min="0" step="any" placeholder="pakai bawaan"></div>
           <div><label>Durasi kerja saat ini</label><input class="inp" id="aOvActualNow" disabled style="opacity:.7;background:#F3F4F6"></div>
@@ -269,6 +284,7 @@
         <button type="button" class="mini gray" onclick="aOvAddMember()" style="margin-bottom:6px">+ Tambah Mekanik</button>
         <button class="mini" onclick="queueOverride()">💾 Simpan Override</button>
         <div class="sub" style="margin:6px 0 0">Override (base points / waktu kerja / tim) diantre & tersimpan SEBELUM approve (FIFO).</div>
+        </div>
       </div>
 
       <!-- 📋 Riwayat override: SIAPA mengubah APA -->
