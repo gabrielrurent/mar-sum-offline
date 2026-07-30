@@ -157,9 +157,14 @@
           <button type="button" class="timerBtn btnPause" id="modalBtnPause" onclick="modalTimerPause()" style="display:none">⏸ Pause</button>
           <button type="button" class="timerBtn btnStop" id="modalBtnStop" onclick="modalTimerStop()" style="display:none">⏹ Stop & Isi Jam</button>
         </div>
+        <!-- Kesimpulan waktu pengerjaan setelah Stop -->
+        <div id="fTimerSummary" style="display:none;margin-top:9px;background:#DCFCE7;border:1px solid #86EFAC;color:#166534;border-radius:8px;padding:9px 11px;font-size:13px;font-weight:700;text-align:center"></div>
+        <div style="font-size:11px;color:#0284c7;margin-top:7px;line-height:1.5">▶ mulai kerja · ⏸ jeda · ⏹ selesai. Durasi terhitung otomatis & tersimpan walau app ditutup. Memulai WO lain akan menjeda WO ini.</div>
       </div>
 
-      <div class="row2">
+      <!-- Jam mulai/selesai: DIISI OTOMATIS oleh timer (mekanik tak perlu mengetik).
+           Disembunyikan agar tak salah isi; nilainya tetap terkirim saat submit. -->
+      <div class="row2" id="manualTimeRow" style="display:none">
         <div><label>Jam Mulai *</label><input type="datetime-local" class="inp" id="fStart"></div>
         <div><label>Jam Selesai *</label><input type="datetime-local" class="inp" id="fEnd"></div>
       </div>

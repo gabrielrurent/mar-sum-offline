@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v9'; // samakan dgn CACHE 'mar-sum-v9' di sw.js tiap rilis
+var APP_VERSION = 'sum-v10'; // samakan dgn CACHE 'mar-sum-v10' di sw.js tiap rilis
 var S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -29,13 +29,39 @@ function saveTimerState(woId, state) {
   S.timerStates[woId] = state;
   kvSet('timer_states', S.timerStates);
 }
+/**
+ * Jeda semua WO lain yang masih berjalan milik orang ini.
+ * JALUR UANG: tanpa ini, dua timer bisa jalan bersamaan → jam kerja dobel-hitung
+ * → poin & rupiah salah. Waktu WO yang dijeda tetap tersimpan utuh.
+ * @return {Array} daftar woId yang barusan dijeda
+ */
+function pauseOtherRunningTimers(currentWoId) {
+  var paused = [];
+  if (!S.timerStates) return paused;
+  for (var id in S.timerStates) {
+    if (!S.timerStates.hasOwnProperty(id)) continue;
+    if (String(id) === String(currentWoId)) continue;
+    var st = S.timerStates[id];
+    if (!st || st.state !== 'running') continue;
+    st.elapsed_ms = (parseFloat(st.elapsed_ms) || 0) + (Date.now() - (parseFloat(st.start_epoch) || Date.now()));
+    st.state = 'paused';
+    st.start_epoch = 0;
+    S.timerStates[id] = st;
+    paused.push(id);
+  }
+  if (paused.length) kvSet('timer_states', S.timerStates);
+  return paused;
+}
+
 function startLiveTimer(woId) {
+  var autoPaused = pauseOtherRunningTimers(woId);   // hanya SATU WO boleh berjalan
   var st = getTimerState(woId);
   st.state = 'running';
   st.start_epoch = Date.now();
   saveTimerState(woId, st);
   startTimerTicker();
   renderAll();
+  if (autoPaused.length) toast('⏸ ' + autoPaused.length + ' WO lain otomatis dijeda (waktunya tersimpan)');
 }
 function pauseLiveTimer(woId) {
   var st = getTimerState(woId);
@@ -46,18 +72,49 @@ function pauseLiveTimer(woId) {
   saveTimerState(woId, st);
   renderAll();
 }
+/**
+ * Hentikan timer TANPA menghapus waktunya.
+ * PENTING (jalur uang): dulu elapsed langsung di-nol-kan di sini, jadi kalau mekanik
+ * menutup form tanpa submit, jam kerjanya HILANG. Sekarang waktu disimpan sebagai
+ * 'paused' dan baru benar-benar dibersihkan setelah submit masuk antrean
+ * (lihat clearTimerAfterSubmit).
+ */
 function stopLiveTimer(woId) {
   var st = getTimerState(woId);
-  var totalMs = st.elapsed_ms;
-  if (st.state === 'running') {
-    totalMs += (Date.now() - st.start_epoch);
-  }
-  st.state = 'idle';
-  st.elapsed_ms = 0;
+  var totalMs = (parseFloat(st.elapsed_ms) || 0);
+  if (st.state === 'running') totalMs += (Date.now() - (parseFloat(st.start_epoch) || Date.now()));
+  st.state = 'paused';
+  st.elapsed_ms = totalMs;   // ← waktu DIPERTAHANKAN
   st.start_epoch = 0;
   saveTimerState(woId, st);
   renderAll();
   return totalMs;
+}
+
+/** Bersihkan timer HANYA setelah pekerjaan benar-benar masuk antrean kirim. */
+function clearTimerAfterSubmit(woId) {
+  saveTimerState(woId, { state: 'idle', start_epoch: 0, elapsed_ms: 0 });
+  renderAll();
+}
+
+/** Ringkasan durasi (jam & menit) — ditampilkan setelah Stop. */
+function msToJamMenit(ms) {
+  var tot = Math.round((parseFloat(ms) || 0) / 60000);
+  var j = Math.floor(tot / 60), m = tot % 60;
+  if (j > 0 && m > 0) return j + ' jam ' + m + ' menit';
+  if (j > 0) return j + ' jam';
+  return m + ' menit';
+}
+
+/** Tampilkan kotak kesimpulan waktu pengerjaan di modal isi kerja. */
+function showTimerSummary(totalMs, startD, endD) {
+  var box = document.getElementById('fTimerSummary');
+  if (!box) return;
+  if (!totalMs || totalMs <= 0) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.style.display = 'block';
+  box.innerHTML = '✅ Total waktu pengerjaan: <b>' + msToJamMenit(totalMs) + '</b>' +
+    '<div style="font-weight:600;font-size:11px;margin-top:3px;opacity:.85">' +
+    formatToDatetimeLocal(startD).replace('T', ' ') + ' → ' + formatToDatetimeLocal(endD).replace('T', ' ') + '</div>';
 }
 function formatMsToHms(ms) {
   if (!ms || ms < 0) return '00:00:00';
@@ -143,12 +200,17 @@ function modalTimerPause() {
 }
 function modalTimerStop() {
   if (!activeWo) return;
+  var cur = getTimerState(activeWo.id);
+  var preview = (parseFloat(cur.elapsed_ms) || 0) + (cur.state === 'running' ? (Date.now() - cur.start_epoch) : 0);
+  if (preview > 0 && preview < 60000 &&
+      !confirm('Durasi kerja baru ' + msToJamMenit(preview) + '.\nYakin hentikan timer dan pakai durasi ini?')) return;
   var totalMs = stopLiveTimer(activeWo.id);
   if (totalMs > 0) {
     var now = new Date();
     var start = new Date(now.getTime() - totalMs);
     document.getElementById('fStart').value = formatToDatetimeLocal(start);
     document.getElementById('fEnd').value = formatToDatetimeLocal(now);
+    showTimerSummary(totalMs, start, now);   // kesimpulan: X jam Y menit
   }
   updateModalTimerUI();
 }
@@ -160,6 +222,7 @@ function openSubmitWithTimer(woId) {
     var start = new Date(now.getTime() - totalMs);
     document.getElementById('fStart').value = formatToDatetimeLocal(start);
     document.getElementById('fEnd').value = formatToDatetimeLocal(now);
+    showTimerSummary(totalMs, start, now);
   }
 }
 
@@ -421,6 +484,9 @@ function openSubmitForm(woId) {
   activeWo = null;
   for (var i=0;i<S.wos.length;i++) if (String(S.wos[i].id)===String(woId)) activeWo=S.wos[i];
   if (!activeWo) return;
+  // Kesimpulan durasi milik WO sebelumnya jangan ikut terbawa
+  var _sum = document.getElementById('fTimerSummary');
+  if (_sum) { _sum.style.display = 'none'; _sum.innerHTML = ''; }
   document.getElementById('fTitle').textContent = activeWo.wo_number;
   document.getElementById('fDesc').innerHTML = '<b>'+esc(activeWo.component_name||'')+'</b>'+(activeWo.unit_name?' · '+esc(activeWo.unit_name):'')+
     '<br>📍 '+esc(locLabel(activeWo.location))+' · Kondisi: '+esc(wcLabel(activeWo.work_condition))+
@@ -446,6 +512,7 @@ function queueSubmit() {
     payload:{wo_id:activeWo.id, start_time:new Date(st).toISOString(), end_time:new Date(en).toISOString(), hour_meter:hm, kilometers:km, part_type:part},
     status:'queued', created_at:new Date().toISOString() };
   obPut(op).then(refreshOutbox).then(function() {
+    clearTimerAfterSubmit(op.wo_id);   // waktu baru dihapus SETELAH masuk antrean
     closeModal('submitModal'); renderAll();
     toast(navigator.onLine?'📮 Mengirim...':'📮 Tersimpan! Terkirim saat ada sinyal');
     syncNow(false);
