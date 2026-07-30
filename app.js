@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v12'; // samakan dgn CACHE 'mar-sum-v12' di sw.js tiap rilis
+var APP_VERSION = 'sum-v13'; // samakan dgn CACHE 'mar-sum-v13' di sw.js tiap rilis
 var S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -363,7 +363,7 @@ function syncNow(manual) {
       if (S.role === 'mechanic') { tasks.push(pullWos()); }
       else {
         // approver (L1/L2) perlu antrean approval + aktif; foreman cukup refs utk Buat WO
-        if (S.role === 'supervisor' || S.role === 'superintendent') { tasks.push(pullPending()); tasks.push(pullActive()); }
+        if (S.role === 'supervisor' || S.role === 'superintendent' || S.role === 'foreman_approver') { tasks.push(pullPending()); tasks.push(pullActive()); }
         if (refsStale()) tasks.push(pullRefs());
       }
       return Promise.all(tasks);
@@ -1128,7 +1128,7 @@ function renderAll() {
   document.getElementById('meName').textContent=S.me?(S.me.name||S.me.mechanic_id):'';
   // Peran → tab: mekanik=WO Saya; foreman=Buat WO; L1/L2=Buat WO + Approval
   var isMechanic = (S.role==='mechanic');
-  var isApprover = (S.role==='supervisor' || S.role==='superintendent');
+  var isApprover = (S.role==='supervisor' || S.role==='superintendent' || S.role==='foreman_approver');
   var isForeman = (S.role==='foreman');
   var isCreator = !isMechanic; // foreman + approver
   if (isMechanic) S.tab='wos';
