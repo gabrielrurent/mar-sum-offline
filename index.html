@@ -66,6 +66,17 @@
     .chkRow{display:flex;align-items:center;gap:6px;margin:6px 0;font-size:13px;color:var(--text)}
     .chkRow input[type="checkbox"]{width:18px;height:18px;accent-color:var(--primary)}
     .ovBox{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:var(--radius-sm);padding:11px;margin:8px 0}
+    .ovLog{background:#FFFBEB;border:1px solid #FDE68A;border-radius:var(--radius-sm);padding:10px 12px;margin:8px 0}
+    .ovLogTitle{font-size:11px;font-weight:800;color:#92400E;text-transform:uppercase;letter-spacing:.03em;margin-bottom:5px}
+    .ovLogItem{font-size:12px;color:#374151;margin-bottom:5px}
+    .ovLogItem:last-child{margin-bottom:0}
+    .ovLogWho{font-weight:800;color:#111827}
+    .ovLogTime{font-size:10px;color:#9CA3AF;margin-left:5px}
+    .ovLogList{margin:3px 0 0 15px;padding:0}
+    .ovLogList li{font-size:12px;line-height:1.6}
+    .ovTag{display:inline-block;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;margin-right:4px}
+    .ovTag.l1{background:#FED7AA;color:#C2410C}
+    .ovTag.l2{background:#E9D5FF;color:#7C3AED}
     .timerPill{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:var(--radius-sm);padding:10px;text-align:center;margin:10px 0}
     .timerClock{font-size:24px;font-weight:800;font-family:monospace;color:#1e40af}
     .timerBtns{display:flex;gap:6px;justify-content:center;margin-top:8px;flex-wrap:wrap}
@@ -241,14 +252,25 @@
         <div class="sub" style="margin:0 0 6px;font-weight:700;color:#1e40af">✏️ Override (opsional)</div>
         <div class="row2">
           <div><label>Base Points</label><input type="number" class="inp" id="aOvBp" min="0" step="any" placeholder="pakai bawaan"></div>
-          <div><label>Target Hours</label><input type="number" class="inp" id="aOvTh" min="0" step="any" placeholder="pakai bawaan"></div>
+          <div><label>Durasi kerja saat ini</label><input class="inp" id="aOvActualNow" disabled style="opacity:.7;background:#F3F4F6"></div>
         </div>
+        <!-- ⏱️ Override WAKTU KERJA (mengganti override Target Hours) -->
+        <label>⏱️ Waktu Kerja (Start → Stop)</label>
+        <div class="row2">
+          <div><span class="sub" style="margin:0">Mulai</span><input type="datetime-local" class="inp" id="aOvStart" onchange="aOvHitungDurasi()"></div>
+          <div><span class="sub" style="margin:0">Selesai</span><input type="datetime-local" class="inp" id="aOvEnd" onchange="aOvHitungDurasi()"></div>
+        </div>
+        <div id="aOvDurBox" style="background:#EFF6FF;border:1px solid #BFDBFE;color:#1e40af;border-radius:8px;padding:8px 10px;font-size:13px;font-weight:700;margin-bottom:8px">Durasi: <span id="aOvDurText">-</span></div>
+
         <label>Tim Mekanik <span class="sub" style="display:inline;margin:0">(tiap anggota poin penuh)</span></label>
         <div id="aOvTeam"></div>
         <button type="button" class="mini gray" onclick="aOvAddMember()" style="margin-bottom:6px">+ Tambah Mekanik</button>
         <button class="mini" onclick="queueOverride()">💾 Simpan Override</button>
-        <div class="sub" style="margin:6px 0 0">Override (base/target/tim) diantre & tersimpan SEBELUM approve (FIFO).</div>
+        <div class="sub" style="margin:6px 0 0">Override (base points / waktu kerja / tim) diantre & tersimpan SEBELUM approve (FIFO).</div>
       </div>
+
+      <!-- 📋 Riwayat override: SIAPA mengubah APA -->
+      <div id="aOvLog" class="ovLog" style="display:none"></div>
 
       <label>Catatan</label>
       <input class="inp" id="aNotes" placeholder="opsional">
