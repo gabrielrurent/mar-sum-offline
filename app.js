@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v11'; // samakan dgn CACHE 'mar-sum-v11' di sw.js tiap rilis
+var APP_VERSION = 'sum-v12'; // samakan dgn CACHE 'mar-sum-v12' di sw.js tiap rilis
 var S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -697,15 +697,11 @@ function openCreateForm() {
     return;
   }
   if (navigator.onLine && (refsStale() || !(S.refs.work_conditions && S.refs.work_conditions.length))) { pullRefs().catch(function(){}); }
-  // Pekerjaan (komponen + Others)
-  var cSel = document.getElementById('cComp');
-  cSel.innerHTML = '<option value="">-- Pilih Pekerjaan --</option>';
-  var comps = S.refs.components || [];
-  for (var ci=0;ci<comps.length;ci++) {
-    if (String(comps[ci].component_no) === 'COM-OTHERS') continue; // Others jadi opsi terpisah di bawah
-    cSel.innerHTML += '<option value="'+esc(comps[ci].component_no)+'">'+esc(comps[ci].component_name)+'</option>';
-  }
-  cSel.innerHTML += '<option value="COM-OTHERS">✏️ Others (job manual)</option>';
+  // Pekerjaan: KATEGORI dulu → komponen ter-filter (cascading, sama seperti web).
+  // Komponen bisa ratusan; memilih kategori dulu membuat daftar jauh lebih ringkas.
+  fillCategoryOptions();
+  document.getElementById('cCat').value = '';
+  document.getElementById('cComp').innerHTML = '<option value="">-- Pilih Kategori Dulu --</option>';
   // Unit
   var uSel = document.getElementById('cUnit');
   uSel.innerHTML = '<option value="">-- Pilih Unit --</option>';
@@ -728,6 +724,44 @@ function openCreateForm() {
   document.getElementById('cPreview').style.display='none';
   showModal('createModal');
 }
+/** Isi dropdown KATEGORI (dedup dari Config_Components) + opsi Others. */
+function fillCategoryOptions() {
+  var sel = document.getElementById('cCat');
+  if (!sel) return;
+  var comps = (S.refs && S.refs.components) || [];
+  var cats = [], hasOthers = false;
+  for (var i = 0; i < comps.length; i++) {
+    if (String(comps[i].component_no) === 'COM-OTHERS') { hasOthers = true; continue; }
+    var c = String(comps[i].category || 'General').trim();
+    if (cats.indexOf(c) === -1) cats.push(c);
+  }
+  cats.sort();
+  var html = '<option value="">-- Pilih Kategori Pekerjaan --</option>';
+  for (var k = 0; k < cats.length; k++) html += '<option value="'+esc(cats[k])+'">'+esc(cats[k])+'</option>';
+  if (hasOthers) html += '<option value="OTHERS">━━━ OTHERS / Custom Job ━━━</option>';
+  sel.innerHTML = html;
+}
+
+/** Kategori dipilih → isi dropdown komponen sesuai kategori itu (cascading, 1:1 web). */
+function onCatChange() {
+  var cat = document.getElementById('cCat').value;
+  var sel = document.getElementById('cComp');
+  var comps = (S.refs && S.refs.components) || [];
+  var html = '<option value="">-- Pilih Component / Pekerjaan --</option>';
+  if (cat === 'OTHERS') {
+    html += '<option value="COM-OTHERS">OTHERS - Custom Job</option>';
+  } else if (cat) {
+    for (var i = 0; i < comps.length; i++) {
+      var c = comps[i];
+      if (String(c.component_no) === 'COM-OTHERS') continue;
+      if (String(c.category || 'General').trim().toLowerCase() !== cat.toLowerCase()) continue;
+      html += '<option value="'+esc(c.component_no)+'">('+esc(c.component_no)+') '+esc(c.component_name)+'</option>';
+    }
+  }
+  sel.innerHTML = html;
+  onCompChange();
+}
+
 function onCompChange() {
   var isOthers = document.getElementById('cComp').value === 'COM-OTHERS';
   document.getElementById('cOthersWrap').style.display = isOthers ? 'block' : 'none';
@@ -821,6 +855,8 @@ function queueCreate(keepOpen) {
   });
 }
 function resetCreateFieldsForNext(){
+  document.getElementById('cCat').value='';
+  document.getElementById('cComp').innerHTML='<option value="">-- Pilih Kategori Dulu --</option>';
   document.getElementById('cComp').value='';
   document.getElementById('cKet').value='';
   ['cOthersDesc','cOthersBp','cOthersTh','cOthersUf'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });

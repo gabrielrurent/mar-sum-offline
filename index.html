@@ -194,8 +194,10 @@
   <div class="modal" id="createModal">
     <div class="sheet">
       <h2>➕ Buat Work Order</h2>
-      <label>Pekerjaan *</label>
-      <select class="inp" id="cComp" onchange="onCompChange()"></select>
+      <label>Kategori Pekerjaan *</label>
+      <select class="inp" id="cCat" onchange="onCatChange()"></select>
+      <label>Komponen / Pekerjaan *</label>
+      <select class="inp" id="cComp" onchange="onCompChange()"><option value="">-- Pilih Kategori Dulu --</option></select>
 
       <!-- Others fields (saat pilih Others) -->
       <div id="cOthersWrap" style="display:none">
