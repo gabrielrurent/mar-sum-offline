@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v14'; // samakan dgn CACHE 'mar-sum-v14' di sw.js tiap rilis
+var APP_VERSION = 'sum-v15'; // samakan dgn CACHE 'mar-sum-v15' di sw.js tiap rilis
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -348,8 +348,20 @@ function requestBgSync() {
 }
 
 /* ── Sync ── */
+/** Indikator progres pengiriman antrean, mis. "📤 Mengirim 2/5 · L2 WO-123". */
+function showSendProgress(idx, total, op) {
+  var el = document.getElementById('outboxInfo');
+  if (!el) return;
+  var label = op ? (opLabel(op) || '') : '';
+  el.textContent = '📤 Mengirim ' + idx + '/' + total + (label ? ' · ' + label : '') + '…';
+  el.style.color = '#1e40af';
+}
+
+var _syncAgain = false;   // ada permintaan sync yang datang saat sync sedang jalan
 function syncNow(manual) {
-  if (S.syncing) return Promise.resolve();
+  // JANGAN buang permintaan ini (dulu: langsung return → approve ke-2 dst menggantung
+  // sampai user menekan Sync manual). Tandai, lalu jalankan otomatis setelah selesai.
+  if (S.syncing) { _syncAgain = true; return Promise.resolve(); }
   if (manual) requestNotifPermission();
   if (!navigator.onLine) { requestBgSync(); if (manual) toast('📴 Offline — tersimpan, Mengirim… otomatis saat ada sinyal'); renderAll(); return Promise.resolve(); }
   S.syncing = true; renderAll();
@@ -371,7 +383,10 @@ function syncNow(manual) {
     .then(function() { S.lastSync = new Date().toISOString(); subscribePush(); return kvSet('last_sync',S.lastSync); })
     .catch(function(e) { requestBgSync(); toast('⚠️ Sync gagal: '+e.message); })
     .then(function() { S.syncing = false; return refreshOutbox(); })
-    .then(renderAll);
+    .then(function() {
+      renderAll();
+      if (_syncAgain) { _syncAgain = false; return syncNow(false); }   // kirim sisa antrean
+    });
 }
 function flushOutbox() {
   var sent = 0;
@@ -384,13 +399,16 @@ function flushOutbox() {
       if (ca<cb) return -1; if (ca>cb) return 1;
       return (a.seq||0)-(b.seq||0);
     });
+    var _total = queue.length, _idx = 0;
     var chain = Promise.resolve();
     queue.forEach(function(it) {
       chain = chain.then(function() {
+        _idx++;
+        showSendProgress(_idx, _total, it);   // "Mengirim 2/5 · L2 WO-xxx"
         return api(it.action, it.payload, it.op_id).then(function(r) {
           if (r.success) { it.status='done'; it.result=r.result; sent++; }
           else { it.status='failed'; it.error=(typeof r.error==='string')?r.error:JSON.stringify(r.error); }
-          return obPut(it);
+          return obPut(it).then(function(){ return refreshOutbox(); }).then(function(){ renderAll(); });
         }).catch(function() { return obPut(it).then(function(){throw new Error('koneksi terputus');}); });
       });
     });
@@ -1270,12 +1288,11 @@ function renderWos(el) {
       (wo.created_at?'<br>📅 Dibuat: '+esc(fmtDateTime(wo.created_at)):'')+
       ((parseFloat(wo.partial_hours)||0)>0?'<br>📥 Lintas shift: '+wo.partial_hours+' jam dari shift sebelumnya':'')+'</div>'+
       (wo.keterangan?'<div class="ket">📝 '+esc(wo.keterangan)+'</div>':'')+
-      // Hasil akhir (tab Done): poin & rupiah yang didapat mekanik ini
+      // Tab Done: cukup status disetujui — poin/rupiah SENGAJA tidak ditampilkan
+      // di PWA (keputusan Gabriel); rincian uang dilihat lewat laporan payroll.
       (String(wo.status)==='approved'
-        ? '<div style="margin-top:8px;background:#ECFDF5;border:1px solid #A7F3D0;border-radius:10px;padding:9px 11px;font-size:13px;color:#065F46;font-weight:800">'+
-          '🏆 '+(wo.my_points||0)+' poin · Rp '+fmtIdr(wo.my_idr||0)+
-          (wo.safety_incident?'<div style="font-weight:700;font-size:11px;color:#B91C1C;margin-top:3px">⚠️ Safety incident — poin 0</div>':'')+
-          '</div>'
+        ? '<div style="margin-top:8px;background:#ECFDF5;border:1px solid #A7F3D0;border-radius:10px;padding:8px 11px;font-size:12px;color:#065F46;font-weight:700">✅ Sudah disetujui'+
+          (wo.safety_incident?' · <span style="color:#B91C1C">⚠️ Safety incident</span>':'')+'</div>'
         : '')+
       timerControls+
       expiredNotice+
