@@ -1,4 +1,4 @@
-var CACHE = 'mar-sum-v17';
+var CACHE = 'mar-sum-v18';
 var ASSETS = ['./', './index.html', './app.js', './manifest.json', './icon-192.png', './icon-512.png', './foto.png'];
 self.addEventListener('install', function(e) {
   e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(ASSETS);}));
@@ -162,6 +162,26 @@ self.addEventListener('fetch', function(e) {
   if (e.request.method !== 'GET') return;
   var url = new URL(e.request.url);
   if (url.origin !== self.location.origin) return;
+
+  // FILE INTI (index.html / app.js / sw.js) → NETWORK-FIRST.
+  // Dulu semuanya cache-first: begitu ter-cache, jaringan tak pernah dicek lagi,
+  // sehingga versi LAMA terus tersaji di HP walau sudah rilis baru. Sekarang saat
+  // online selalu ambil versi terbaru, dan tetap jatuh ke cache bila offline.
+  var isCore = /\/(index\.html|app\.js|sw\.js)$/.test(url.pathname) || url.pathname.replace(/\/+$/, '') === self.location.pathname.replace(/\/[^\/]*$/, '');
+  if (isCore) {
+    e.respondWith(
+      fetch(e.request).then(function(resp) {
+        var copy = resp.clone();
+        caches.open(CACHE).then(function(c){ c.put(e.request, copy); });
+        return resp;
+      }).catch(function() {
+        return caches.match(e.request).then(function(hit) { return hit || caches.match('./index.html'); });
+      })
+    );
+    return;
+  }
+
+  // Aset statis (ikon, manifest, foto) → cache-first (hemat kuota, jarang berubah)
   e.respondWith(
     caches.match(e.request).then(function(hit) {
       if (hit) return hit;
