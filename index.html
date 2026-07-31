@@ -71,10 +71,13 @@
     .chkRow input[type="checkbox"]{width:18px;height:18px;accent-color:var(--primary)}
     /* ===== LAYAR LOGIN BERLATAR FOTO TIM (responsif HP) ===== */
     #screen-login.loginBg{
-      position:fixed;top:0;left:0;right:0;bottom:0;max-width:none;margin:0;padding:0;
+      position:fixed;top:0;left:0;right:0;bottom:0;max-width:none;margin:0;padding:20px 0;
       display:flex;align-items:center;justify-content:center;overflow-y:auto;z-index:20;
       background:#0b1b33 url('./bg-login.jpg') center center / cover no-repeat;
     }
+    /* margin:auto pada anak flex = benar-benar di tengah, dan tetap bisa di-scroll
+       bila layar pendek / keyboard HP terbuka (tidak terpotong di atas). */
+    #screen-login.loginBg > div{ margin:auto; }
     /* Lapisan gelap: teks tetap terbaca di atas foto, dan nuansa biru SUM terjaga */
     #screen-login.loginBg::before{
       content:'';position:absolute;top:0;left:0;right:0;bottom:0;
