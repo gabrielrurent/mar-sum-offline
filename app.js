@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v22'; // samakan dgn CACHE 'mar-sum-v22' di sw.js tiap rilis
+var APP_VERSION = 'sum-v23'; // samakan dgn CACHE 'mar-sum-v23' di sw.js tiap rilis
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -1146,6 +1146,44 @@ function showModal(id) { document.getElementById(id).style.display='flex'; }
 function closeModal(id) { document.getElementById(id).style.display='none'; }
 
 /* ── Render ── */
+/**
+ * Apakah ada isian yang belum tersimpan di layar yang sedang terlihat?
+ * Dipakai untuk memutuskan boleh-tidaknya memuat ulang otomatis saat versi baru
+ * datang. Hanya memeriksa kolom yang BENAR-BENAR terlihat (offsetParent) — kolom
+ * di layar tersembunyi tak boleh menahan pembaruan.
+ */
+function adaIsianBelumTersimpan() {
+  try {
+    var kolom = document.querySelectorAll('input, textarea, select');
+    for (var i = 0; i < kolom.length; i++) {
+      var k = kolom[i];
+      if (k.offsetParent === null) continue;          // tak terlihat
+      if (k.disabled || k.readOnly) continue;
+      if (k.type === 'hidden' || k.type === 'button' || k.type === 'submit') continue;
+      if (k.tagName === 'SELECT') { if (k.selectedIndex > 0) return true; continue; }
+      if (String(k.value || '').trim() !== '') return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
+/** Pita ajakan muat ulang — muncul hanya bila pembaruan ditunda demi isian. */
+function tampilkanPitaVersiBaru() {
+  if (document.getElementById('pitaVersiBaru')) return;
+  var p = document.createElement('div');
+  p.id = 'pitaVersiBaru';
+  p.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;' +
+    'background:#1e40af;color:#fff;border-radius:12px;padding:12px 14px;' +
+    'box-shadow:0 6px 20px rgba(0,0,0,.28);display:flex;align-items:center;gap:10px;' +
+    'font-size:14px;line-height:1.35';
+  p.innerHTML = '<div style="flex:1">✨ <b>Versi baru siap.</b><br>' +
+    '<span style="opacity:.85;font-size:13px">Selesaikan isian dulu, lalu muat ulang.</span></div>' +
+    '<button id="pitaMuatUlang" style="background:#fff;color:#1e40af;border:0;border-radius:8px;' +
+    'padding:9px 14px;font-weight:800;font-size:14px">Muat Ulang</button>';
+  document.body.appendChild(p);
+  document.getElementById('pitaMuatUlang').onclick = function(){ window.location.reload(); };
+}
+
 function showScreen(nm) {
   var lv = document.getElementById('loginVersion');
   if (lv) lv.textContent = APP_VERSION;
@@ -1500,7 +1538,13 @@ openDb().then(function() {
     navigator.serviceWorker.register('./sw.js');
     var _swReloaded = false;
     navigator.serviceWorker.addEventListener('controllerchange', function() {
-      if (_swReloaded) return; _swReloaded = true; window.location.reload();
+      if (_swReloaded) return; _swReloaded = true;
+      // Versi baru siap. Kalau layar sedang KOSONG dari isian, muat ulang diam-diam —
+      // pemakai tak perlu tahu apa-apa. Tapi kalau mekanik sedang mengetik jam kerja /
+      // HM / KM, memuat ulang akan MENGHAPUS ketikannya. Untuk itu tunda, tampilkan
+      // pita, biar dia yang memilih waktunya.
+      if (adaIsianBelumTersimpan()) { tampilkanPitaVersiBaru(); return; }
+      window.location.reload();
     });
   }
   showScreen(S.token?'main':'login');
