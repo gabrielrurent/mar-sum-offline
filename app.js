@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v20'; // samakan dgn CACHE 'mar-sum-v20' di sw.js tiap rilis
+var APP_VERSION = 'sum-v21'; // samakan dgn CACHE 'mar-sum-v21' di sw.js tiap rilis
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -1390,7 +1390,9 @@ function queuedOpFor(woId){
   return null;
 }
 function queuedNote(qop){ return '<div class="obinfo">📮 '+esc(opLabel(qop))+' — menunggu sinyal (tombol dikunci)</div>'; }
-function teamStr(team){ return (team||[]).map(function(t){ return esc(t.name||t.mechanic_name||t.mechanic_id||t)+(t.email?' <span class="sub" style="display:inline;margin:0">('+esc(t.email)+')</span>':''); }).join(', '); }
+// Email TIDAK ditampilkan — yang dikenali orang di lapangan adalah nama.
+// Sama dengan web (Approval.html: baris email anggota tim sudah dihapus).
+function teamStr(team){ return (team||[]).map(function(t){ return esc(t.name||t.mechanic_name||t.mechanic_id||t); }).join(', '); }
 function ovBadges(wo){ return (wo.has_override_spv?'<span class="badge" style="background:#4338ca">SPV override</span>':'')+(wo.has_override_supt?'<span class="badge" style="background:#7c3aed">SUPT override</span>':''); }
 function cancelBtn(wo){ return '<button class="big secondary" onclick="openCancelForm(\''+esc(String(wo.id))+'\',\''+esc(String(wo.wo_number))+'\')">🗑 Batalkan WO</button>'; }
 function renderPendingList(list){
