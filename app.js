@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v25'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v26'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -1364,7 +1364,7 @@ function renderAll() {
   // Foreman boleh berada di tab 'create' ATAU 'active' (dulu selalu dipaksa balik ke
   // 'create', sehingga tab WO Aktif terasa "tidak bisa diklik").
   else if (isForeman && S.tab!=='create' && S.tab!=='active') S.tab='create';
-  else if (isApprover && S.tab==='wos') S.tab='approval';
+  else if (isApprover && (S.tab==='wos' || S.tab==='active')) S.tab='approval';
   document.getElementById('tabBar').style.display = isCreator ? 'flex' : 'none';
   // Tab khusus mekanik: Assigned | Pending | Done
   var mtb = document.getElementById('mechTabBar');
@@ -1380,7 +1380,11 @@ function renderAll() {
   document.getElementById('tabCreate').style.display = isCreator ? '' : 'none';
   var tActive = document.getElementById('tabActive');
   if (tActive) {
-    tActive.style.display = isCreator ? '' : 'none';
+    // HANYA foreman. Approver sudah punya daftar WO aktif di sub-tab Approval
+    // (Pending | Aktif | Approved), jadi tab atas ini cuma mengulang. Foreman
+    // TIDAK punya menu Approval sama sekali — baginya ini satu-satunya jalan,
+    // jadi tak boleh ikut dihapus.
+    tActive.style.display = isForeman ? '' : 'none';
     tActive.className = 'tab' + (S.tab === 'active' ? ' active' : '');
   }
   document.getElementById('tabApproval').style.display = isApprover ? '' : 'none';
