@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v26'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v27'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -390,7 +390,11 @@ function syncNow(manual) {
       if (S.role === 'mechanic') { tasks.push(pullWos()); }
       else {
         // approver (L1/L2) perlu antrean approval + aktif; foreman cukup refs utk Buat WO
-        if (S.role === 'supervisor' || S.role === 'superintendent' || S.role === 'foreman_approver') { tasks.push(pullPending()); tasks.push(pullActive()); }
+        // pullApproved ikut sinkron sejak daftarnya dibatasi bulan berjalan (puluhan
+        // baris, bukan ribuan lagi). Tanpa ini daftar Approved tak pernah diperbarui:
+        // dulu hanya ditarik saat sub-tab dibuka DAN daftarnya kosong, jadi salinan
+        // lama di IndexedDB bertahan selamanya walau server sudah menyaring.
+        if (S.role === 'supervisor' || S.role === 'superintendent' || S.role === 'foreman_approver') { tasks.push(pullPending()); tasks.push(pullActive()); tasks.push(pullApproved()); }
         else if (S.role === 'foreman') { tasks.push(pullActive()); }   // foreman: pantau WO aktif
         if (refsStale()) tasks.push(pullRefs());
       }
@@ -1544,7 +1548,9 @@ function renderApprovalTab(el) {
 }
 function switchAppSub(sub){
   S.appSub = sub;
-  if (sub==='approved' && !S.approved.length && navigator.onLine) { toast('⏳ Memuat approved...'); pullApproved().then(renderAll).catch(function(){}); }
+  // Selalu tarik ulang saat sub-tab dibuka (bukan hanya saat kosong) — supaya WO
+  // yang baru disahkan langsung terlihat tanpa menunggu sinkron berikutnya.
+  if (sub==='approved' && navigator.onLine) { pullApproved().then(renderAll).catch(function(){}); }
   renderAll();
 }
 function fmtIdr(n){ n=parseFloat(n)||0; return n.toLocaleString('id-ID'); }
