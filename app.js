@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v23'; // samakan dgn CACHE 'mar-sum-v23' di sw.js tiap rilis
+var APP_VERSION = 'sum-v24'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -1146,6 +1146,129 @@ function showModal(id) { document.getElementById(id).style.display='flex'; }
 function closeModal(id) { document.getElementById(id).style.display='none'; }
 
 /* ── Render ── */
+// == PEMBARUAN VERSI =========================================================
+// sw.js sudah skipWaiting()+clients.claim(), jadi versi baru mengambil alih
+// begitu TERUNDUH. Yang mudah hilang: PEMICUNYA. register() hanya mengecek saat
+// halaman dimuat, sedangkan PWA di HP bisa berhari-hari tak pernah dinavigasi
+// ulang - pemakainya tertinggal di versi lama tanpa tanda apa pun.
+var _swReg = null;
+var _swReloaded = false;
+var _swLastCheck = 0;
+var SW_CHECK_MIN_MS = 10 * 60 * 1000;   // sw.js di GitHub Pages max-age=600
+
+/** Minta browser mengecek sw.js baru. Dibatasi agar tak boros kuota. */
+function cekPembaruan(paksa) {
+  if (!_swReg || !navigator.onLine) return;
+  var now = Date.now();
+  if (!paksa && (now - _swLastCheck) < SW_CHECK_MIN_MS) return;
+  _swLastCheck = now;
+  try { _swReg.update(); } catch (e) {}
+}
+
+/** Muat ulang sekali saja - dipanggil saat SW baru mengambil alih. */
+function _lakukanReloadSW() {
+  if (_swReloaded) return;
+  _swReloaded = true;
+  window.location.reload();
+}
+
+/**
+ * Versi di server dibaca dari sw.js itu sendiri (var CACHE = 'mar-sum-vNN'),
+ * dengan pembatal cache. Jadi tak perlu berkas versi terpisah yang bisa lupa
+ * dinaikkan lalu berbohong diam-diam.
+ */
+function bacaVersiServer() {
+  var url = './sw.js?cek=' + Date.now();
+  return fetch(url, {cache: 'no-store'}).then(function(r){ return r.text(); }).then(function(t) {
+    var m = t.match(/var CACHE = '(mar-sum-v\d+)'/);
+    return m ? m[1].replace('mar-', '') : null;
+  });
+}
+
+function _setVStatus(teks, bg, fg) {
+  var el = document.getElementById('vStatus');
+  if (!el) return;
+  el.textContent = teks; el.style.background = bg; el.style.color = fg;
+}
+
+function bukaCekVersi() {
+  document.getElementById('vTerpasang').textContent = APP_VERSION;
+  document.getElementById('vServer').textContent = 'mengecek...';
+  document.getElementById('vBtnUpdate').style.display = 'none';
+  document.getElementById('vCatatan').style.display = 'none';
+  _setVStatus('\u23f3 Mengecek...', '#F3F4F6', '#374151');
+  showModal('versiModal');
+
+  if (!navigator.onLine) {
+    document.getElementById('vServer').textContent = '-';
+    _setVStatus('\ud83d\udcf4 Tidak ada sinyal - sambungkan dulu untuk cek versi', '#FEF2F2', '#991B1B');
+    return;
+  }
+  bacaVersiServer().then(function(v) {
+    document.getElementById('vServer').textContent = v || '?';
+    if (!v) { _setVStatus('\u26a0\ufe0f Gagal membaca versi server', '#FEF2F2', '#991B1B'); return; }
+    if (v === APP_VERSION) {
+      _setVStatus('\u2705 Sudah versi terbaru', '#ECFDF5', '#065F46');
+    } else {
+      _setVStatus('\u2b06\ufe0f Versi baru tersedia: ' + v, '#FFFBEB', '#92400E');
+      document.getElementById('vBtnUpdate').style.display = 'block';
+      document.getElementById('vCatatan').style.display = 'block';
+    }
+  }).catch(function() {
+    document.getElementById('vServer').textContent = '?';
+    _setVStatus('\u26a0\ufe0f Gagal menghubungi server', '#FEF2F2', '#991B1B');
+  });
+}
+
+/**
+ * Perbarui paksa: hapus SELURUH cache aplikasi lalu muat ulang.
+ * AMAN untuk antrean - outbox ada di IndexedDB, bukan Cache Storage; yang
+ * dihapus hanya berkas aplikasi (html/js/ikon) yang toh diunduh ulang.
+ * Karena itu wajib online: menghapus cache saat offline membuat aplikasi tak
+ * bisa dibuka sama sekali.
+ */
+function perbaruiSekarang() {
+  if (!navigator.onLine) { toast('\ud83d\udcf4 Perlu sinyal untuk memperbarui'); return; }
+  var btn = document.getElementById('vBtnUpdate');
+  btn.disabled = true; btn.textContent = '\u23f3 Memperbarui...';
+  _setVStatus('\u23f3 Mengunduh versi baru...', '#FFFBEB', '#92400E');
+
+  var langkah = Promise.resolve();
+  if (window.caches && caches.keys) {
+    langkah = caches.keys().then(function(keys) {
+      return Promise.all(keys.map(function(k){ return caches.delete(k); }));
+    }).catch(function(){});
+  }
+  langkah.then(function() {
+    if (_swReg && _swReg.update) { try { return _swReg.update(); } catch (e) {} }
+  }).then(function() {
+    // Tak perlu menunggu controllerchange - cache sudah kosong, jadi berkas
+    // pasti diambil dari jaringan.
+    _swReloaded = true;
+    setTimeout(function(){ window.location.reload(); }, 600);
+  }).catch(function() {
+    btn.disabled = false; btn.textContent = '\u2b07\ufe0f Perbarui Sekarang';
+    _setVStatus('\u26a0\ufe0f Gagal memperbarui - coba lagi', '#FEF2F2', '#991B1B');
+  });
+}
+
+/**
+ * Baca versi dari nama cache SW yang BENAR-BENAR aktif, supaya angka yang
+ * tampil selalu jujur. Tanpa ini APP_VERSION di app.js bisa tertinggal dari
+ * CACHE di sw.js dan layar menampilkan versi yang salah.
+ */
+function syncVersionFromCache() {
+  try {
+    if (typeof caches === 'undefined' || !caches.keys) return Promise.resolve();
+    return caches.keys().then(function(keys) {
+      for (var i = 0; i < keys.length; i++) {
+        var m = /^mar-(sum-v\d+)$/.exec(keys[i]);
+        if (m) { APP_VERSION = m[1]; break; }
+      }
+    }).catch(function(){});
+  } catch (e) { return Promise.resolve(); }
+}
+
 /**
  * Apakah ada isian yang belum tersimpan di layar yang sedang terlihat?
  * Dipakai untuk memutuskan boleh-tidaknya memuat ulang otomatis saat versi baru
@@ -1181,11 +1304,12 @@ function tampilkanPitaVersiBaru() {
     '<button id="pitaMuatUlang" style="background:#fff;color:#1e40af;border:0;border-radius:8px;' +
     'padding:9px 14px;font-weight:800;font-size:14px">Muat Ulang</button>';
   document.body.appendChild(p);
-  document.getElementById('pitaMuatUlang').onclick = function(){ window.location.reload(); };
+  document.getElementById('pitaMuatUlang').onclick = function(){ _lakukanReloadSW(); };
 }
 
 function showScreen(nm) {
   var lv = document.getElementById('loginVersion');
+  if (lv) { lv.style.cursor = 'pointer'; lv.title = 'Ketuk untuk cek versi'; lv.onclick = bukaCekVersi; }
   if (lv) lv.textContent = APP_VERSION;
   if (nm !== 'login') setLoginLoading(false);
   // 'flex' (bukan 'block') — layar login memakai flexbox agar isinya benar-benar
@@ -1535,18 +1659,32 @@ openDb().then(function() {
   return refreshOutbox();
 }).then(function() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js');
-    var _swReloaded = false;
+    navigator.serviceWorker.register('./sw.js').then(function(reg) {
+      _swReg = reg;
+      cekPembaruan();                       // cek sekali saat aplikasi dibuka
+    }).catch(function(){});
+
     navigator.serviceWorker.addEventListener('controllerchange', function() {
-      if (_swReloaded) return; _swReloaded = true;
+      if (_swReloaded) return;
       // Versi baru siap. Kalau layar sedang KOSONG dari isian, muat ulang diam-diam —
       // pemakai tak perlu tahu apa-apa. Tapi kalau mekanik sedang mengetik jam kerja /
       // HM / KM, memuat ulang akan MENGHAPUS ketikannya. Untuk itu tunda, tampilkan
       // pita, biar dia yang memilih waktunya.
       if (adaIsianBelumTersimpan()) { tampilkanPitaVersiBaru(); return; }
-      window.location.reload();
+      _lakukanReloadSW();
     });
+
+    // PWA sering dibiarkan terbuka berhari-hari tanpa pernah dinavigasi ulang.
+    // Tanpa dua pemicu ini, pengecekan versi tak pernah jalan dan HP tetap di
+    // versi lama tanpa tanda apa pun.
+    document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'visible') cekPembaruan();
+    });
+    window.addEventListener('online', function(){ cekPembaruan(); });
   }
+  // Angka versi diambil dari nama cache SW yang benar-benar aktif, lalu layar
+  // digambar ulang — supaya yang tampil bukan tebakan dari konstanta di berkas ini.
+  syncVersionFromCache().then(function(){ renderAll(); });
   showScreen(S.token?'main':'login');
   if (S.token) requestPeriodicSync();
   if (IS_IOS && !IS_STANDALONE) { var _ib = document.getElementById('installBtn'); if (_ib) _ib.style.display = ''; }

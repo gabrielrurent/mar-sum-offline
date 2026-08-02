@@ -181,6 +181,7 @@
   <div class="wrap" id="screen-main" style="display:none">
     <div class="syncbar">
       <button class="mini" id="syncBtn" onclick="syncNow(true)">🔄 Sync</button>
+      <button class="mini gray" id="verBtn" onclick="bukaCekVersi()" title="Cek versi aplikasi">⬆️ Versi</button>
       <div><div style="font-size:13px;font-weight:700" id="meName"></div><div class="sub" style="margin:0" id="lastSync"></div></div>
     </div>
     <div class="obinfo" id="outboxInfo" onclick="toggleOutboxDetail()" style="cursor:pointer"></div>
@@ -399,5 +400,24 @@
 
   <div id="toast"></div>
   <script src="./app.js"></script>
+  <!-- MODAL: Versi aplikasi -->
+  <div class="modal" id="versiModal">
+    <div class="sheet">
+      <h2 style="font-size:17px;margin-bottom:12px">⬆️ Versi Aplikasi</h2>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px">
+        <span class="sub" style="margin:0">Terpasang di HP ini</span>
+        <b id="vTerpasang" style="font-size:15px">-</b>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:10px">
+        <span class="sub" style="margin:0">Terbaru di server</span>
+        <b id="vServer" style="font-size:15px">mengecek…</b>
+      </div>
+      <div id="vStatus" style="border-radius:var(--radius-sm);padding:10px 12px;font-size:13px;font-weight:700;margin-bottom:6px">⏳ Mengecek…</div>
+      <div class="sub" id="vCatatan" style="display:none">Pekerjaan yang masih antre <b>tidak akan hilang</b> — antrean disimpan terpisah dari cache aplikasi.</div>
+      <button class="big" id="vBtnUpdate" style="display:none" onclick="perbaruiSekarang()">⬇️ Perbarui Sekarang</button>
+      <button class="big secondary" onclick="closeModal('versiModal')" style="margin-top:6px">Tutup</button>
+    </div>
+  </div>
+
 </body>
 </html>
