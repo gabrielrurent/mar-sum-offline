@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v24'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v25'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 var REFS_TTL_MS = 12*60*60*1000;
@@ -624,7 +624,7 @@ function openApproveTransferModal(woId) {
   }
   if (!activeTransferApproval) return;
   var wo = activeTransferApproval;
-  document.getElementById('trAppDesc').innerHTML = 'WO: <b>' + esc(wo.wo_number) + '</b><br>Diminta oleh: <b>' + esc(wo.transfer_requested_by_name || wo.transfer_requested_by || wo.created_by_name || '-') + '</b>' +
+  document.getElementById('trAppDesc').innerHTML = 'WO: <b>' + esc(wo.wo_number) + '</b><br>Diminta oleh: <b>' + esc(namaOrang(wo.transfer_requested_by_name || wo.created_by_name, wo.transfer_requested_by)) + '</b>' +
     (wo.transfer_note ? '<br>Catatan: <i>' + esc(wo.transfer_note) + '</i>' : '');
   
   var list = document.getElementById('trRecipientsList');
@@ -957,8 +957,8 @@ function openApproveForm(woId) {
     'Unit Factor: '+(a.unit_factor||1)+' 🔒<br>'+
     '🔧 Part: '+esc(partLabel(a.part_type))+
     (a.hour_meter ? '<br>HM: '+esc(a.hour_meter) : '')+(a.kilometers ? ' · KM: '+esc(a.kilometers) : '')+
-    (a.created_by_name ? '<br>👤 Pembuat: '+esc(a.created_by_name) : (a.created_by ? '<br>👤 Pembuat: '+esc(a.created_by) : ''))+
-    (a.submitted_by_name ? '<br>✍️ Disubmit oleh: '+esc(a.submitted_by_name) : (a.submitted_by ? '<br>✍️ Disubmit oleh: '+esc(a.submitted_by) : ''))+
+    ((a.created_by_name||a.created_by) ? '<br>👤 Pembuat: '+esc(namaOrang(a.created_by_name, a.created_by)) : '')+
+    ((a.submitted_by_name||a.submitted_by) ? '<br>✍️ Disubmit oleh: '+esc(namaOrang(a.submitted_by_name, a.submitted_by)) : '')+
     (a.keterangan ? '<br>📝 '+esc(a.keterangan) : '');
   document.getElementById('aTeam').textContent = 'Tim: '+(a.team||[]).map(function(t){return t.name;}).join(', ');
   document.getElementById('aStatus').textContent = 'Status: '+a.status;
@@ -1052,7 +1052,7 @@ function renderOverrideLog(wo) {
   for (var i=0;i<list.length;i++) {
     var ov = list[i];
     html += '<div class="ovLogItem"><span class="ovTag '+(ov.level==='spv'?'l1':'l2')+'">'+(ov.level==='spv'?'L1':'L2')+'</span>' +
-      '<span class="ovLogWho">'+esc(ov.by_name||ov.by||'-')+'</span>' +
+      '<span class="ovLogWho">'+esc(namaOrang(ov.by_name, ov.by))+'</span>' +
       (ov.at?'<span class="ovLogTime">'+esc(fmtDateTime(ov.at))+'</span>':'') + '<ul class="ovLogList">';
     for (var c=0;c<(ov.changes||[]).length;c++) {
       var ch = ov.changes[c];
@@ -1554,6 +1554,19 @@ function queuedOpFor(woId){
 function queuedNote(qop){ return '<div class="obinfo">📮 '+esc(opLabel(qop))+' — menunggu sinyal (tombol dikunci)</div>'; }
 // Email TIDAK ditampilkan — yang dikenali orang di lapangan adalah nama.
 // Sama dengan web (Approval.html: baris email anggota tim sudah dihapus).
+/**
+ * Nama orang untuk DITAMPILKAN. Tidak pernah mengembalikan alamat email utuh.
+ * Sama persis dengan namaOrang() di UIHelpers.gs sisi web - satu aturan, dua kanal.
+ */
+function namaOrang(nama, email) {
+  var n = (nama === null || nama === undefined) ? '' : String(nama).trim();
+  if (n && n.indexOf('@') === -1) return n;
+  var e = (email === null || email === undefined) ? '' : String(email).trim();
+  if (!e) return n || '-';
+  var at = e.indexOf('@');
+  return at > 0 ? e.substring(0, at) : e;
+}
+
 function teamStr(team){ return (team||[]).map(function(t){ return esc(t.name||t.mechanic_name||t.mechanic_id||t); }).join(', '); }
 function ovBadges(wo){ return (wo.has_override_spv?'<span class="badge" style="background:#4338ca">SPV override</span>':'')+(wo.has_override_supt?'<span class="badge" style="background:#7c3aed">SUPT override</span>':''); }
 function cancelBtn(wo){ return '<button class="big secondary" onclick="openCancelForm(\''+esc(String(wo.id))+'\',\''+esc(String(wo.wo_number))+'\')">🗑 Batalkan WO</button>'; }
@@ -1576,7 +1589,7 @@ function renderPendingList(list){
 
     var transferInfo = isTransfer
       ? '<br><b>🔀 Permintaan Transfer:</b>' +
-        (wo.transfer_requested_by_name || wo.transfer_requested_by ? '<br>Diminta oleh: ' + esc(wo.transfer_requested_by_name || wo.transfer_requested_by) : '') +
+        (wo.transfer_requested_by_name || wo.transfer_requested_by ? '<br>Diminta oleh: ' + esc(namaOrang(wo.transfer_requested_by_name, wo.transfer_requested_by)) : '') +
         (wo.transfer_note ? '<br>Catatan: <i>' + esc(wo.transfer_note) + '</i>' : '')
       : '';
 
@@ -1588,8 +1601,8 @@ function renderPendingList(list){
       (wo.actual_hours ? ' · Aktual: '+fmtJamMenit(wo.actual_hours) : '')+'<br>'+
       'Base: '+(wo.base_points||0)+' pts · Unit Factor: '+(wo.unit_factor||1)+' 🔒<br>'+
       (wo.part_type ? '🔧 Part: '+esc(partLabel(wo.part_type))+'<br>' : '')+
-      ((wo.created_by_name||wo.created_by)?'👤 Pembuat: '+esc(wo.created_by_name||wo.created_by)+'<br>':'')+
-      ((wo.submitted_by_name||wo.submitted_by)?'✍️ Disubmit: '+esc(wo.submitted_by_name||wo.submitted_by)+'<br>':'')+
+      ((wo.created_by_name||wo.created_by)?'👤 Pembuat: '+esc(namaOrang(wo.created_by_name, wo.created_by))+'<br>':'')+
+      ((wo.submitted_by_name||wo.submitted_by)?'✍️ Disubmit: '+esc(namaOrang(wo.submitted_by_name, wo.submitted_by))+'<br>':'')+
       '👥 Tim: '+teamStr(wo.team)+
       transferInfo +
       '</div>'+
@@ -1620,7 +1633,7 @@ function renderActiveList(){
     html+='<div class="card"><div class="cardTop"><b>'+esc(wo.wo_number)+'</b><span class="badge" style="background:#1d4ed8">📝 Belum diisi</span>'+othersBadge+'</div>'+
       '<div class="cardBody"><b>'+esc(wo.component_name||'-')+'</b><br>'+
       '📍 Lokasi: '+esc(locLabel(wo.location))+'<br>'+
-      'Kondisi: '+esc(wcLabel(wo.work_condition))+((wo.created_by_name||wo.created_by)?' · Pembuat: '+esc(wo.created_by_name||wo.created_by):'')+'<br>'+
+      'Kondisi: '+esc(wcLabel(wo.work_condition))+((wo.created_by_name||wo.created_by)?' · Pembuat: '+esc(namaOrang(wo.created_by_name, wo.created_by)):'')+'<br>'+
       '👥 Tim: '+(teamNames||[]).map(function(n){return esc(n);}).join(', ')+'</div>'+
       (wo.keterangan?'<div class="ket">📝 '+esc(wo.keterangan)+'</div>':'')+
       (function(){ var q=queuedOpFor(wo.id); return q ? queuedNote(q) : cancelBtn(wo); })()+'</div>';
