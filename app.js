@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v28'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v29'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
@@ -401,7 +401,11 @@ function syncNow(manual) {
         // lama di IndexedDB bertahan selamanya walau server sudah menyaring.
         if (S.role === 'supervisor' || S.role === 'superintendent' || S.role === 'foreman_approver') { tasks.push(pullPending()); tasks.push(pullActive()); tasks.push(pullApproved()); }
         else if (S.role === 'foreman') { tasks.push(pullActive()); }   // foreman: pantau WO aktif
-        if (refsStale()) tasks.push(pullRefs());
+        // Sync yang DITEKAN pemakai selalu menarik katalog & daftar mekanik, tanpa
+        // peduli TTL — menekan Sync berarti "ambil yang terbaru", dan itu satu-satunya
+        // cara pemakai memaksa perubahan spreadsheet turun ke HP-nya.
+        if (manual) tasks.push(pullRefs(true));
+        else if (refsStale()) tasks.push(pullRefs());
       }
       return Promise.all(tasks);
     })
@@ -447,8 +451,14 @@ function pullWos() {
     return kvSet('wos', S.wos);
   });
 }
-function pullRefs() {
-  return api('pull_create_refs').then(function(r) {
+/**
+ * @param {boolean} paksaSegar - true saat Sync DITEKAN pemakai: server diminta
+ *   membuang cache konfigurasinya dulu, sehingga perubahan base_points /
+ *   target_hours / daftar mekanik yang baru diketik di spreadsheet ikut terbawa.
+ *   Sync otomatis memakai jalur biasa supaya tetap ringan.
+ */
+function pullRefs(paksaSegar) {
+  return api('pull_create_refs', paksaSegar ? {fresh: 1} : {}).then(function(r) {
     if (!r.success) return;
     S.refs = r.result.refs;
     S.refsAt = new Date().toISOString();
