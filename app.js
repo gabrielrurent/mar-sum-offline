@@ -6,10 +6,15 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v27'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v28'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
-var REFS_TTL_MS = 12*60*60*1000;
+// Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
+// ditahan lama. Angka 12 jam dulu ikut terbawa dari KMB yang katalognya ±1.400
+// pekerjaan. Akibatnya perubahan target_hours di spreadsheet baru terlihat di HP
+// setengah hari kemudian — padahal target_hours menentukan faktor ketepatan
+// waktu, yang menentukan poin dan rupiah.
+var REFS_TTL_MS = 15*60*1000;
 function refsStale() { return !S.refs || !S.refsAt || (Date.now() - new Date(S.refsAt).getTime() > REFS_TTL_MS); }
 var db = null;
 // Urutan enqueue dalam sesi — jaminan FIFO saat flush (override HARUS sebelum approve).
@@ -751,7 +756,17 @@ function openCreateForm() {
     } else { toast('📴 Sync dulu saat ada sinyal untuk memuat referensi'); }
     return;
   }
-  if (navigator.onLine && (refsStale() || !(S.refs.work_conditions && S.refs.work_conditions.length))) { pullRefs().catch(function(){}); }
+  // Saat form Buat WO dibuka, katalog SELALU disegarkan bila ada sinyal — inilah
+  // saat base_points & target_hours benar-benar menentukan uang, jadi tak boleh
+  // memakai salinan lama. Dropdown diisi ulang setelah data tiba.
+  if (navigator.onLine) {
+    pullRefs().then(function() {
+      var cat = document.getElementById('cCat');
+      var catLama = cat ? cat.value : '';
+      fillCategoryOptions();
+      if (cat && catLama) { cat.value = catLama; onCatChange(); }
+    }).catch(function(){});
+  }
   // Pekerjaan: KATEGORI dulu → komponen ter-filter (cascading, sama seperti web).
   // Komponen bisa ratusan; memilih kategori dulu membuat daftar jauh lebih ringkas.
   fillCategoryOptions();
