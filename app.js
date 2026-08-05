@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v30'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v31'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
@@ -383,6 +383,11 @@ function syncNow(manual) {
   // sampai user menekan Sync manual). Tandai, lalu jalankan otomatis setelah selesai.
   if (S.syncing) { _syncAgain = true; return Promise.resolve(); }
   if (manual) requestNotifPermission();
+  // Menekan Refresh juga MEMAKSA cek versi aplikasi (paksa=true melewati jeda 10
+  // menit). Dengan begitu pemakai punya satu tombol yang menyegarkan dua-duanya:
+  // data DAN aplikasinya. Pembaruan tetap datang sendiri lewat pemicu lain;
+  // tombol ini cuma cara memastikannya sekarang juga.
+  if (manual) { try { cekPembaruan(true); } catch (eCk) {} }
   if (!navigator.onLine) { requestBgSync(); if (manual) toast('📴 Offline — tersimpan, Mengirim… otomatis saat ada sinyal'); renderAll(); return Promise.resolve(); }
   S.syncing = true; renderAll();
   return flushOutbox()
@@ -526,7 +531,7 @@ function saveTokenOffline(t) {
 function doLogout() {
   var pend = S.outbox.filter(function(o){return o.status==='queued'||o.status==='failed_retry';}).length;
   var msg = pend > 0
-    ? '⚠️ PERHATIAN: masih ada '+pend+' operasi BELUM TERKIRIM di antrean.\nLogout akan MENGHAPUS antrean itu PERMANEN (laporan/approval hilang).\n\nSaran: batal, cari sinyal, tekan 🔄 Sync sampai antrean kosong, baru logout.\n\nTetap logout dan hapus antrean?'
+    ? '⚠️ PERHATIAN: masih ada '+pend+' operasi BELUM TERKIRIM di antrean.\nLogout akan MENGHAPUS antrean itu PERMANEN (laporan/approval hilang).\n\nSaran: batal, cari sinyal, tekan 🔄 Refresh sampai antrean kosong, baru logout.\n\nTetap logout dan hapus antrean?'
     : 'Logout? Data lokal akan dihapus.';
   if (!confirm(msg)) return;
   var tx = db.transaction(['kv','outbox'],'readwrite');
@@ -778,7 +783,7 @@ function openCreateForm() {
       toast('⏳ Memuat data referensi...');
       pullRefs().then(function(){ if (S.refs) openCreateForm(); else toast('❌ Gagal memuat referensi'); })
         .catch(function(){ toast('❌ Gagal memuat referensi'); });
-    } else { toast('📴 Sync dulu saat ada sinyal untuk memuat referensi'); }
+    } else { toast('📴 Refresh dulu saat ada sinyal untuk memuat referensi'); }
     return;
   }
   // Saat form Buat WO dibuka, katalog SELALU disegarkan bila ada sinyal — inilah
@@ -1423,8 +1428,8 @@ function renderAll() {
   var on=navigator.onLine;
   document.getElementById('netDot').style.background=on?'#22c55e':'#ef4444';
   document.getElementById('netText').textContent=on?'Online':'Offline';
-  document.getElementById('syncBtn').innerHTML = S.syncing ? '<span class="spin"></span>Sync…' : '🔄 Sync';
-  document.getElementById('lastSync').textContent=(S.lastSync?'Sync: '+new Date(S.lastSync).toLocaleString('id-ID'):'Belum sync')+' · '+APP_VERSION;
+  document.getElementById('syncBtn').innerHTML = S.syncing ? '<span class="spin"></span>Sync…' : '🔄 Refresh';
+  document.getElementById('lastSync').textContent=(S.lastSync?'Diperbarui: '+new Date(S.lastSync).toLocaleString('id-ID'):'Belum sync')+' · '+APP_VERSION;
   document.getElementById('meName').textContent=S.me?(S.me.name||S.me.mechanic_id):'';
   // Peran → tab: mekanik=WO Saya; foreman=Buat WO; L1/L2=Buat WO + Approval
   var isMechanic = (S.role==='mechanic');
@@ -1505,7 +1510,7 @@ function mechGroupOf(wo) {
 function renderWos(el) {
   var opByWo={};
   S.outbox.forEach(function(o){if(o.wo_id&&(!opByWo[o.wo_id]||o.created_at>opByWo[o.wo_id].created_at))opByWo[o.wo_id]=o;});
-  if (!S.wos.length) { el.innerHTML='<div class="empty">Belum ada kartu WO.<br>Tekan 🔄 Sync saat ada sinyal.</div>'; return; }
+  if (!S.wos.length) { el.innerHTML='<div class="empty">Belum ada kartu WO.<br>Tekan 🔄 Refresh saat ada sinyal.</div>'; return; }
   // Filter sesuai tab mekanik (Assigned / Pending / Done)
   var listWos = S.wos.filter(function(w){ return mechGroupOf(w) === S.mechTab; });
   if (!listWos.length) {
@@ -1578,7 +1583,7 @@ function renderWos(el) {
   el.innerHTML=html;
 }
 function renderCreateTab(el) {
-  if (!S.refs) { el.innerHTML='<div class="empty">Tekan 🔄 Sync untuk memuat data referensi.</div>'; return; }
+  if (!S.refs) { el.innerHTML='<div class="empty">Tekan 🔄 Refresh untuk memuat data referensi.</div>'; return; }
   el.innerHTML='<button class="big" onclick="openCreateForm()" style="margin-bottom:12px">➕ Buat Work Order Baru</button>'+
     '<div class="sub">Referensi: '+((S.refs.components||[]).length)+' pekerjaan · '+((S.refs.units||[]).length)+' unit · '+((S.refs.mechanics||[]).length)+' mekanik</div>';
 }
@@ -1718,7 +1723,7 @@ function renderActiveList(){
   return html;
 }
 function renderApprovedList(){
-  if (!S.approved.length) return '<div class="empty">Belum ada WO approved.<br>Tekan 🔄 Sync saat online.</div>';
+  if (!S.approved.length) return '<div class="empty">Belum ada WO approved.<br>Tekan 🔄 Refresh saat online.</div>';
   var html='<div class="sub">'+S.approved.length+' WO approved (terbaru)</div>';
   S.approved.forEach(function(wo){
     var othersBadge = wo.is_others ? '<span class="badge" style="background:#0ea5e9">OTHERS</span>' : '';
