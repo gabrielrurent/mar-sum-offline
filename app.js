@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v29'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v30'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
@@ -435,7 +435,10 @@ function flushOutbox() {
         _idx++;
         showSendProgress(_idx, _total, it);   // "Mengirim 2/5 · L2 WO-xxx"
         return api(it.action, it.payload, it.op_id).then(function(r) {
-          if (r.success) { it.status='done'; it.result=r.result; sent++; }
+          if (r.success) {
+            it.status='done'; it.result=r.result; sent++;
+            majukanStatusLokal(it);   // badge langsung ke tahap berikutnya
+          }
           else { it.status='failed'; it.error=(typeof r.error==='string')?r.error:JSON.stringify(r.error); }
           return obPut(it).then(function(){ return refreshOutbox(); }).then(function(){ renderAll(); });
         }).catch(function() { return obPut(it).then(function(){throw new Error('koneksi terputus');}); });
@@ -576,6 +579,18 @@ function queueSubmit() {
   if (isNaN(hm)||hm<=0) { toast('Hour Meter wajib > 0'); return; }
   if (isNaN(km)||km<=0) { toast('Kilometer wajib > 0'); return; }
   if (!part) { toast('Jenis part wajib dipilih'); return; } // SUM: part_type WAJIB
+  // Jangan biarkan satu WO diantre dua kali. Tekanan kedua memakai op_id baru,
+  // lolos dedup server, lalu ditolak karena statusnya sudah pindah.
+  var _sudahAntre = (S.outbox || []).some(function(o) {
+    return o.action === 'submit_work' && String(o.wo_id) === String(activeWo.id) &&
+           (o.status === 'queued' || o.status === 'failed_retry');
+  });
+  if (_sudahAntre) {
+    closeModal('submitModal');
+    toast('✓ Sudah dalam antrean — tak perlu dikirim ulang');
+    renderAll();
+    return;
+  }
   var op = { op_id:uuid(), seq:(_enqSeq++), action:'submit_work', wo_id:activeWo.id, wo_number:activeWo.wo_number,
     payload:{wo_id:activeWo.id, start_time:new Date(st).toISOString(), end_time:new Date(en).toISOString(), hour_meter:hm, kilometers:km, part_type:part},
     status:'queued', created_at:new Date().toISOString() };
@@ -1364,6 +1379,33 @@ function fmtDateTime(iso){
   if(isNaN(d.getTime())) return '-';
   return d.toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
 }
+/**
+ * Majukan status WO di salinan LOKAL segera setelah operasinya berhasil.
+ *
+ * Tanpa ini ada jeda buruk: begitu antrean selesai, badge "Antre" hilang tapi
+ * S.wos masih menyimpan status lama, sehingga kartu sempat menampilkan
+ * "Perlu diisi" lagi sampai pull_my_wos tiba. Mekanik mengira kirimannya batal,
+ * lalu menekan Kirim sekali lagi -- dan dari situlah alarm Gagal Kirim lahir.
+ *
+ * Ini hanya menyegarkan TAMPILAN. Server tetap pemegang kebenaran; sinkron
+ * berikutnya akan menimpanya dengan status sebenarnya.
+ */
+function majukanStatusLokal(op) {
+  if (!op || !op.wo_id) return;
+  var lanjut = {
+    submit_work: 'pending_supervisor',
+    approve_l1:  'pending_superintendent',
+    approve_l2:  'approved',
+    reject:      'rejected',
+    cancel_wo:   'cancelled'
+  };
+  var baru = lanjut[op.action];
+  if (!baru) return;
+  for (var i = 0; i < S.wos.length; i++) {
+    if (String(S.wos[i].id) === String(op.wo_id)) { S.wos[i].status = baru; break; }
+  }
+}
+
 function badgeFor(wo,pendingOp) {
   if (pendingOp) {
     if (pendingOp.status==='queued') return ['📮 Antre','#b45309'];

@@ -1,4 +1,4 @@
-var CACHE = 'mar-sum-v29';
+var CACHE = 'mar-sum-v30';
 var ASSETS = ['./', './index.html', './app.js', './manifest.json', './icon-192.png', './icon-512.png', './foto.png', './bg-login.jpg'];
 self.addEventListener('install', function(e) {
   e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(ASSETS);}));
