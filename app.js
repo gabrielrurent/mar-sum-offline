@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v33'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v34'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
@@ -568,7 +568,18 @@ function doLogin() {
   } else { setLoginLoading(false); saveTokenOffline(t); }
 }
 function saveTokenOffline(t) {
-  kvSet('token',t).then(function() { toast('📴 Token disimpan — verifikasi saat ada sinyal'); showScreen('main'); renderAll(); });
+  // Peran BELUM diketahui (ping tak sempat jalan). Kosongkan peran lama supaya
+  // token baru tidak mewarisi hak pemakai sebelumnya di HP ini — dan karena
+  // peran kosong kini berarti hak terkecil, layar yang tampil adalah tampilan
+  // mekanik, bukan Buat WO.
+  S.role = null; S.me = null;
+  kvSet('token',t)
+    .then(function(){ return kvSet('role', null); })
+    .then(function(){ return kvSet('me', null); })
+    .then(function() {
+      toast('📴 Token disimpan — peran diverifikasi saat ada sinyal');
+      showScreen('main'); renderAll();
+    });
 }
 function doLogout() {
   var pend = S.outbox.filter(function(o){return o.status==='queued'||o.status==='failed_retry';}).length;
@@ -1481,10 +1492,16 @@ function renderAll() {
   document.getElementById('lastSync').textContent=(S.lastSync?'Diperbarui: '+new Date(S.lastSync).toLocaleString('id-ID'):'Belum sync')+' · '+APP_VERSION;
   document.getElementById('meName').textContent=S.me?(S.me.name||S.me.mechanic_id):'';
   // Peran → tab: mekanik=WO Saya; foreman=Buat WO; L1/L2=Buat WO + Approval
-  var isMechanic = (S.role==='mechanic');
+  // Peran TAK DIKENAL (mis. login saat offline, atau ping gagal) diperlakukan
+  // sebagai hak TERKECIL. Dulu isCreator = !isMechanic, yaitu gagal-TERBUKA:
+  // peran kosong pun dianggap pembuat WO, sehingga mekanik yang login dengan
+  // sinyal buruk langsung disuguhi layar Buat WO.
   var isApprover = (S.role==='supervisor' || S.role==='superintendent' || S.role==='foreman_approver');
   var isForeman = (S.role==='foreman');
-  var isCreator = !isMechanic; // foreman + approver
+  var isMechanic = (S.role==='mechanic') || !(isApprover || isForeman);
+  // Diturunkan dari peran yang DIKENAL, bukan dari negasi — supaya yang tak
+  // dikenal tak pernah kebagian hak membuat WO.
+  var isCreator = isApprover || isForeman;
   if (isMechanic) S.tab='wos';
   // Foreman boleh berada di tab 'create' ATAU 'active' (dulu selalu dipaksa balik ke
   // 'create', sehingga tab WO Aktif terasa "tidak bisa diklik").
