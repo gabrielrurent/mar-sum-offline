@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v31'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v32'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
@@ -383,11 +383,6 @@ function syncNow(manual) {
   // sampai user menekan Sync manual). Tandai, lalu jalankan otomatis setelah selesai.
   if (S.syncing) { _syncAgain = true; return Promise.resolve(); }
   if (manual) requestNotifPermission();
-  // Menekan Refresh juga MEMAKSA cek versi aplikasi (paksa=true melewati jeda 10
-  // menit). Dengan begitu pemakai punya satu tombol yang menyegarkan dua-duanya:
-  // data DAN aplikasinya. Pembaruan tetap datang sendiri lewat pemicu lain;
-  // tombol ini cuma cara memastikannya sekarang juga.
-  if (manual) { try { cekPembaruan(true); } catch (eCk) {} }
   if (!navigator.onLine) { requestBgSync(); if (manual) toast('📴 Offline — tersimpan, Mengirim… otomatis saat ada sinyal'); renderAll(); return Promise.resolve(); }
   S.syncing = true; renderAll();
   return flushOutbox()
@@ -1204,6 +1199,13 @@ var _swReg = null;
 var _swReloaded = false;
 var _swLastCheck = 0;
 var SW_CHECK_MIN_MS = 10 * 60 * 1000;   // sw.js di GitHub Pages max-age=600
+
+/* PEMBAGIAN TUGAS DUA TOMBOL - jangan dicampur lagi:
+     Refresh (syncNow)  -> menarik DATA terbaru: WO, approval, katalog, mekanik.
+     Versi (bukaCekVersi) -> mengambil APLIKASI terbaru: fitur & perbaikan.
+   Pembaruan aplikasi tetap datang SENDIRI lewat pemicu otomatis di bawah
+   (aplikasi dibuka, kembali terlihat, sinyal kembali). Tombol Versi hanya cara
+   memastikannya sekarang juga - bukan satu-satunya jalan. */
 
 /** Minta browser mengecek sw.js baru. Dibatasi agar tak boros kuota. */
 function cekPembaruan(paksa) {
