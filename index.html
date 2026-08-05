@@ -118,6 +118,9 @@
     .btnStart{background:#10b981;color:#fff}
     .btnPause{background:#f59e0b;color:#fff}
     .btnStop{background:#ef4444;color:#fff}
+    /* Reset dibuat NETRAL, bukan merah - merah sudah dipakai Stop, dan menyamakan
+       warnanya membuat tombol penghapus waktu mudah tertekan saat buru-buru. */
+    .btnReset{background:#fff;color:#475569;border:1px solid #cbd5e1}
     .btnTransfer{background:#4f46e5;color:#fff;width:100%;margin-top:6px}
 
     /* ===== SPLASH SCREEN ===== */
@@ -217,6 +220,7 @@
           <button type="button" class="timerBtn btnStart" id="modalBtnStart" onclick="modalTimerStart()">▶ Start</button>
           <button type="button" class="timerBtn btnPause" id="modalBtnPause" onclick="modalTimerPause()" style="display:none">⏸ Pause</button>
           <button type="button" class="timerBtn btnStop" id="modalBtnStop" onclick="modalTimerStop()" style="display:none">⏹ Stop & Isi Jam</button>
+          <button type="button" class="timerBtn btnReset" id="modalBtnReset" onclick="modalTimerReset()" style="display:none">↺ Reset</button>
         </div>
         <!-- Kesimpulan waktu pengerjaan setelah Stop -->
         <div id="fTimerSummary" style="display:none;margin-top:9px;background:#DCFCE7;border:1px solid #86EFAC;color:#166534;border-radius:8px;padding:9px 11px;font-size:13px;font-weight:700;text-align:center"></div>
