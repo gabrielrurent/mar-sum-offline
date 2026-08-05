@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v34'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v35'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
@@ -1821,7 +1821,11 @@ openDb().then(function() {
   return refreshOutbox();
 }).then(function() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').then(function(reg) {
+    // updateViaCache:'none' -> berkas sw.js TIDAK PERNAH diambil dari cache HTTP
+    // browser saat mengecek pembaruan. Tanpa ini, GitHub Pages menyajikannya
+    // dengan max-age=600 sehingga versi baru bisa tertahan s/d 10 menit dan
+    // pembaruan terasa tidak otomatis padahal pemicunya sudah jalan.
+    navigator.serviceWorker.register('./sw.js', {updateViaCache: 'none'}).then(function(reg) {
       _swReg = reg;
       cekPembaruan();                       // cek sekali saat aplikasi dibuka
     }).catch(function(){});
