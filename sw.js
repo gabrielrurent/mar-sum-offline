@@ -1,4 +1,4 @@
-var CACHE = 'mar-sum-v36';
+var CACHE = 'mar-sum-v37';
 var ASSETS = ['./', './index.html', './app.js', './manifest.json', './icon-192.png', './icon-512.png', './foto.png', './bg-login.jpg'];
 self.addEventListener('install', function(e) {
   e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(ASSETS);}));
@@ -32,10 +32,14 @@ function swReq(d, store, mode, fn) {
     rq.onerror = function(){ rej(rq.error); };
   });
 }
-function swNotify(body) {
+/* tag: 16 karakter pertama kabar antrean SELALU sama, jadi dulu tiap notifikasi
+   menimpa yang sebelumnya — dua WO berurutan cuma terlihat satu. Sekarang tag
+   unik secara bawaan, dan pemanggil boleh menentukannya sendiri supaya notifikasi
+   sebuah WO bisa ditutup lagi saat WO itu keluar dari antrean. */
+function swNotify(body, tag) {
   try {
     if (self.Notification && Notification.permission === 'granted') {
-      return self.registration.showNotification('MAR SUM', {body: body, icon: './icon-192.png', badge: './icon-192.png', tag: 'mar-' + body.slice(0, 16)});
+      return self.registration.showNotification('MAR SUM', {body: body, icon: './icon-192.png', badge: './icon-192.png', tag: tag || ('mar-' + Date.now() + '-' + Math.round(Math.random()*1e6))});
     }
   } catch (e) {}
   return Promise.resolve();
@@ -110,23 +114,46 @@ function swCheckPending() {
             var stageLbl = (role === 'superintendent') ? '(L2)' : '(L1)';
             for (var id in cur) {
               if (!prev[id]) {
-                if (isApprover) msgs.push('📋 Ada WO perlu di-approve ' + stageLbl + ': ' + cur[id].n);
-                else if (cur[id].s === 'pending_mechanic_work') msgs.push('📝 WO baru: ' + cur[id].n);
+                // "perlu di-approve" terdengar seperti tugas pribadi, padahal
+                // antreannya dipegang bersama — approver lain bisa saja sudah
+                // menanganinya. "masuk antrean" jujur soal itu.
+                if (isApprover) msgs.push({t: 'mar-wo-' + id, b: '📋 WO masuk antrean ' + stageLbl + ': ' + cur[id].n});
+                else if (cur[id].s === 'pending_mechanic_work') msgs.push({t: 'mar-wo-' + id, b: '📝 WO baru: ' + cur[id].n});
               } else if (prev[id].s !== cur[id].s) {
-                if (cur[id].s === 'approved') msgs.push('✅ ' + cur[id].n + ' disetujui');
-                else if (cur[id].s === 'rejected') msgs.push('❌ ' + cur[id].n + ' ditolak');
+                if (cur[id].s === 'approved') msgs.push({t: 'mar-wo-' + id, b: '✅ ' + cur[id].n + ' disetujui'});
+                else if (cur[id].s === 'rejected') msgs.push({t: 'mar-wo-' + id, b: '❌ ' + cur[id].n + ' ditolak'});
               }
             }
             if (!isApprover) {
               // hilang dari daftar setelah menunggu L2 = disetujui & diarsip
               for (var pid in prev) {
-                if (!cur[pid] && prev[pid].s === 'pending_superintendent') msgs.push('✅ ' + prev[pid].n + ' disetujui');
+                if (!cur[pid] && prev[pid].s === 'pending_superintendent') msgs.push({t: 'mar-wo-' + pid, b: '✅ ' + prev[pid].n + ' disetujui'});
               }
             }
+            // Notifikasi WO yang sudah KELUAR dari antrean ditutup sendiri —
+            // approver tak perlu memilah kabar untuk pekerjaan yang sudah
+            // ditangani orang lain. Tanpa ini, notifikasi basi menumpuk dan
+            // yang baru ikut tak dipercaya.
             var p = Promise.resolve();
+            if (isApprover && self.registration.getNotifications) {
+              p = p.then(function() {
+                return self.registration.getNotifications().then(function(list) {
+                  list.forEach(function(n) {
+                    var t = String(n.tag || '');
+                    if (t.indexOf('mar-wo-') !== 0) return;
+                    if (!cur[t.slice(7)]) n.close();
+                  });
+                }).catch(function(){});
+              });
+            }
+            // Satu notifikasi per WO (maksimal 3), masing-masing bertag sendiri.
             if (msgs.length) {
-              var body = msgs.slice(0, 3).join('\n') + (msgs.length > 3 ? '\n+' + (msgs.length - 3) + ' lainnya' : '');
-              p = swNotify(body);
+              msgs.slice(0, 3).forEach(function(m) {
+                p = p.then(function(){ return swNotify(m.b, m.t); });
+              });
+              if (msgs.length > 3) {
+                p = p.then(function(){ return swNotify('+' + (msgs.length - 3) + ' pembaruan lainnya'); });
+              }
             }
             return p.then(save).then(function(){ return msgs.length; });
           });

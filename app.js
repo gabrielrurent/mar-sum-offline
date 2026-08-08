@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v36'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v37'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], monitoring:[], monitoringOverall:{}, outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
@@ -356,7 +356,7 @@ function requestNotifPermission() {
 function notifyLocal(body) {
   try {
     if ('Notification' in window && Notification.permission === 'granted' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.ready.then(function(reg){ return reg.showNotification('MAR SUM', {body: body, icon: './icon-192.png', badge: './icon-192.png', tag: 'mar-info'}); }).catch(function(){});
+      navigator.serviceWorker.ready.then(function(reg){ return reg.showNotification('MAR SUM', {body: body, icon: './icon-192.png', badge: './icon-192.png', tag: 'mar-' + Date.now() + '-' + Math.round(Math.random()*1e6)}); }).catch(function(){});
     }
   } catch (e) {}
 }
@@ -458,6 +458,7 @@ function syncNow(manual) {
       }
       return Promise.all(tasks);
     })
+    .then(function() { return saringOutboxSetelahSegar(); })
     .then(function() { S.lastSync = new Date().toISOString(); subscribePush(); return kvSet('last_sync',S.lastSync); })
     .catch(function(e) { requestBgSync(); toast('⚠️ Sync gagal: '+e.message); })
     .then(function() { S.syncing = false; return refreshOutbox(); })
@@ -469,6 +470,53 @@ function syncNow(manual) {
 /* Monitoring — cermin halaman Monitoring di web, hanya untuk L1 & L2.
    Server menolak peran lain, jadi kegagalan di sini TIDAK boleh menjatuhkan
    sinkron: peran yang tak berhak cukup diam, bukan memunculkan galat. */
+/* Saring kegagalan SETELAH data segar tiba.
+ *
+ * ATURAN BESI: hilangkan HANYA atas bukti positif. WO yang tidak dikenali TETAP
+ * ditampilkan — diam yang keliru jauh lebih mahal daripada merah yang keliru,
+ * karena approver tak akan pernah tahu ada yang perlu dia kerjakan.
+ *
+ * Hanya op KEPUTUSAN AKHIR yang disaring. save_override sengaja TIDAK ikut:
+ * menyaringnya membuat kartu ikut lenyap padahal approve-nya belum dikirim,
+ * dan approver kehilangan satu-satunya jalan menyetujui WO itu.
+ */
+var _MENDARAT = {
+  submit_work: ['pending_supervisor','pending_superintendent','approved'],
+  approve_l1:  ['pending_superintendent','approved'],
+  approve_l2:  ['approved'],
+  reject:      ['rejected'],
+  cancel_wo:   ['cancelled']
+};
+function saringOutboxSetelahSegar() {
+  var peta = {};
+  [].concat(S.wos||[], S.pending||[], S.active||[], S.approved||[]).forEach(function(w) {
+    if (w && w.id) peta[String(w.id)] = String(w.status || '');
+  });
+  return obAll().then(function(items) {
+    var buang = [], berkabar = 0;
+    items.forEach(function(it) {
+      if (it.status !== 'failed') return;
+      var mendarat = _MENDARAT[it.action];
+      if (!mendarat) return;                       // save_override dll — jangan disentuh
+      if (!peta.hasOwnProperty(String(it.wo_id))) return;   // tak dikenali → BIARKAN
+      var st = peta[String(it.wo_id)];
+      if (!st) return;
+      // Urutan ini penting: "sudah tamat" DIPERIKSA DULU. Kalau dibalik, kiriman
+      // pada WO yang ternyata ditolak ikut dianggap berhasil lalu dihapus
+      // diam-diam, dan orangnya tak pernah tahu keputusannya tidak masuk.
+      if ((st === 'rejected' || st === 'cancelled') && mendarat.indexOf(st) === -1) {
+        buang.push(it.op_id); berkabar++; return;
+      }
+      if (mendarat.indexOf(st) !== -1) buang.push(it.op_id);
+    });
+    if (!buang.length) return;
+    return Promise.all(buang.map(function(id){ return obDel(id); })).then(function() {
+      if (berkabar) toast('ℹ️ '+berkabar+' kiriman dilepas — WO-nya sudah ditolak/dibatalkan');
+      return refreshOutbox();
+    });
+  }).catch(function(){});
+}
+
 function pullMonitoring() {
   return api('pull_monitoring').then(function(r) {
     if (!r || !r.success) return;
@@ -1051,9 +1099,11 @@ function queueCancel(){
   var woNum = document.getElementById('cxDesc').textContent;
   var op = { op_id:uuid(), seq:(_enqSeq++), action:'cancel_wo', wo_id:cancelWoId, wo_number:woNum,
     payload:{ wo_id:cancelWoId, reason:reason }, status:'queued', created_at:new Date().toISOString(), label:'Batal '+woNum };
+  _lepasDariAntrean(cancelWoId);
   obPut(op).then(refreshOutbox).then(function(){
     closeModal('cancelModal'); closeModal('approveModal'); renderAll();
-    toast(navigator.onLine?'📮 Mengirim...':'📮 Tersimpan!');
+    // Sebut keputusannya, bukan prosesnya — sama seperti approve & reject.
+    toast('🚫 '+woNum+' dibatalkan'+(navigator.onLine?'':' — terkirim saat ada sinyal'));
     syncNow(false);
   });
 }
@@ -1222,29 +1272,54 @@ function queueOverride() {
     syncNow(false);
   });
 }
+/* Lepas kartu dari antrean SEKARANG, tanpa menunggu server. Aman karena
+   tarikan berikutnya mengembalikannya bila ternyata memang masih menunggu —
+   dan approver yang kartunya tak kunjung hilang akan menekan Approve lagi. */
+function _lepasDariAntrean(woId) {
+  S.pending = (S.pending || []).filter(function(w){ return String(w.id) !== String(woId); });
+}
+/* Tombol approver dulu tak terkunci saat ditekan (mekanik sudah punya penjaga).
+   Satu ketukan ragu di layar yang lambat = dua op untuk WO yang sama. */
+function _kunciTombolApproval(kunci) {
+  ['aBtnL1','aBtnL2'].forEach(function(id){
+    var b = document.getElementById(id);
+    if (b) b.disabled = kunci;
+  });
+}
 function queueApprove(level) {
+  if (_apprSibuk) return;
+  _apprSibuk = true; _kunciTombolApproval(true);
   var action = level===1 ? 'approve_l1' : 'approve_l2';
   var op = { op_id:uuid(), seq:(_enqSeq++), action:action, wo_id:activeApproval.id, wo_number:activeApproval.wo_number,
     payload:{ wo_id:activeApproval.id, notes:document.getElementById('aNotes').value, safety_incident:document.getElementById('aSafety').checked },
     status:'queued', created_at:new Date().toISOString(), label:(level===1?'L1':'L2')+' '+activeApproval.wo_number };
+  var _nomor = activeApproval.wo_number || activeApproval.id;
+  _lepasDariAntrean(activeApproval.id);
   obPut(op).then(refreshOutbox).then(function() {
     closeModal('approveModal'); renderAll();
-    toast(navigator.onLine?'📮 Mengirim...':'📮 Tersimpan!');
+    // Sebut KEPUTUSANNYA, bukan prosesnya. "Mengirim..." membuat approver
+    // menunggu sesuatu; yang dia perlu tahu adalah keputusannya sudah tercatat.
+    toast('✅ '+_nomor+' disetujui'+(navigator.onLine?'':' — terkirim saat ada sinyal'));
     syncNow(false);
-  });
+  }).catch(function(){}).then(function(){ _apprSibuk = false; _kunciTombolApproval(false); });
 }
+var _apprSibuk = false;
 function queueReject() {
+  if (_apprSibuk) return;
+  _apprSibuk = true;
   var reason = document.getElementById('aReason').value.trim();
   if (!reason) { toast('Isi alasan reject'); return; }
   var stage = activeApproval.status==='pending_superintendent' ? 'superintendent' : 'supervisor';
   var op = { op_id:uuid(), seq:(_enqSeq++), action:'reject', wo_id:activeApproval.id, wo_number:activeApproval.wo_number,
     payload:{ wo_id:activeApproval.id, stage:stage, reason:reason },
     status:'queued', created_at:new Date().toISOString(), label:'Reject '+activeApproval.wo_number };
+  var _nomorR = activeApproval.wo_number || activeApproval.id;
+  _lepasDariAntrean(activeApproval.id);
   obPut(op).then(refreshOutbox).then(function() {
     closeModal('approveModal'); renderAll();
-    toast(navigator.onLine?'📮 Mengirim...':'📮 Tersimpan!');
+    toast('🚫 '+_nomorR+' ditolak'+(navigator.onLine?'':' — terkirim saat ada sinyal'));
     syncNow(false);
-  });
+  }).catch(function(){}).then(function(){ _apprSibuk = false; _kunciTombolApproval(false); });
 }
 
 /* ── Outbox management ── */
@@ -1254,7 +1329,9 @@ function retryOp(opId) {
   }).then(function() { syncNow(true); });
 }
 function discardOp(opId) {
-  if (!confirm('Buang kiriman ini?')) return;
+  // Dulu cuma "Buang kiriman ini?". Orang tak tahu apakah WO-nya ikut hilang,
+  // jadi tak ada yang berani menekannya dan kartu merah menumpuk selamanya.
+  if (!confirm('Buang kiriman ini dari antrean?\n\nWO-nya TIDAK ikut terhapus — yang dibatalkan hanya pengirimannya. Kalau keputusan Anda ternyata belum masuk, WO akan muncul lagi di daftar setelah Refresh.')) return;
   obDel(opId).then(refreshOutbox).then(renderAll);
 }
 
@@ -1441,6 +1518,28 @@ function showScreen(nm) {
   document.getElementById('screen-login').style.display = nm==='login'?'flex':'none';
   document.getElementById('screen-main').style.display = nm==='main'?'block':'none';
 }
+/* Pesan server ditulis untuk pengembang. Diterjemahkan jadi kalimat yang bisa
+   DITINDAKLANJUTI — pemakai lapangan butuh tahu apa yang harus dia perbuat,
+   bukan nama status internal. Yang tak dikenali ditampilkan apa adanya:
+   pesan asing lebih baik daripada tebakan yang menyesatkan. */
+function pesanRamah(err) {
+  var e = String(err || '').trim();
+  if (!e) return 'Tidak terkirim — coba lagi saat sinyal stabil.';
+  var t = e.toLowerCase();
+  if (t.indexOf('pending_supervisor') !== -1 || t.indexOf('pending_superintendent') !== -1 ||
+      t.indexOf('invalid stage') !== -1 || t.indexOf('must be in') !== -1)
+    return 'WO ini sudah lewat tahap tersebut — kemungkinan sudah diproses orang lain atau kiriman sebelumnya sudah masuk. Tekan Buang bila WO-nya sudah benar.';
+  if (t.indexOf('not found') !== -1 || t.indexOf('tidak ditemukan') !== -1)
+    return 'WO tidak ditemukan di server — mungkin sudah dibatalkan. Tekan Refresh dulu.';
+  if (t.indexOf('token') !== -1)
+    return 'Token tidak berlaku. Keluar lalu masuk lagi dengan tautan terbaru.';
+  if (t.indexOf('tidak berhak') !== -1 || t.indexOf('hanya ') !== -1 || t.indexOf('ditolak') !== -1)
+    return e;
+  if (t.indexOf('failed to fetch') !== -1 || t.indexOf('networkerror') !== -1 || t.indexOf('http') !== -1)
+    return 'Sinyal terputus saat mengirim. Akan dicoba lagi otomatis.';
+  return e;
+}
+
 function esc(s) { return String(s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 function toast(msg) {
   var t=document.getElementById('toast'); t.textContent=msg; t.style.display='block';
@@ -1477,7 +1576,12 @@ function majukanStatusLokal(op) {
     approve_l1:  'pending_superintendent',
     approve_l2:  'approved',
     reject:      'rejected',
-    cancel_wo:   'cancelled'
+    cancel_wo:   'cancelled',
+    // Ketiga jalur transfer dulu tak dikenal di sini, jadi kartunya tak pernah
+    // maju dan tampak seolah kiriman tak berpengaruh apa-apa.
+    request_transfer: 'pending_transfer',
+    approve_transfer: 'pending_mechanic_work',
+    reject_transfer:  'pending_mechanic_work'
   };
   var baru = lanjut[op.action];
   if (!baru) return;
@@ -1489,7 +1593,11 @@ function majukanStatusLokal(op) {
 function badgeFor(wo,pendingOp) {
   if (pendingOp) {
     if (pendingOp.status==='queued') return ['📮 Antre','#b45309'];
-    if (pendingOp.status==='failed') return ['⚠️ Gagal Kirim','#b91c1c'];
+    // "Gagal" membuat approver mengira KEPUTUSANNYA yang ditolak sistem.
+    // Yang gagal cuma pengirimannya; keputusannya masih utuh di antrean dan
+    // akan berangkat sendiri saat sinyal kembali. Merah menyala untuk hal yang
+    // sebenarnya masih berjalan membuat orang berhenti mempercayai warna merah.
+    if (pendingOp.status==='failed') return ['📤 Belum terkirim','#b45309'];
   }
   var s=String(wo.status||'');
   if (s==='pending_mechanic_work') return ['📝 Perlu diisi','#1d4ed8'];
@@ -1576,8 +1684,10 @@ function renderAll() {
   // failed outbox
   var failHtml = '';
   S.outbox.filter(function(o){return o.status==='failed';}).forEach(function(o) {
-    failHtml += '<div class="card err"><b>'+esc(opLabel(o))+'</b><br>'+esc(o.error||'-')+
-      '<br><button class="mini" onclick="retryOp(\''+o.op_id+'\')">🔁 Coba lagi</button> '+
+    failHtml += '<div class="card err"><b>'+esc(opLabel(o))+'</b>'+
+      '<div class="sub" style="margin:4px 0 6px">'+esc(pesanRamah(o.error))+'</div>'+
+      '<div class="sub" style="margin-bottom:6px;color:#475569">Mengirim ulang aman — server menolak kiriman kembar, jadi tak akan terhitung dua kali.</div>'+
+      '<button class="mini" onclick="retryOp(\''+o.op_id+'\')">🔁 Coba lagi</button> '+
       '<button class="mini gray" onclick="discardOp(\''+o.op_id+'\')">🗑 Buang</button></div>';
   });
   document.getElementById('failedOps').innerHTML = failHtml;
