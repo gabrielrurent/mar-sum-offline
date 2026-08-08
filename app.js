@@ -6,8 +6,8 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v35'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
-var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
+var APP_VERSION = 'sum-v36'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], monitoring:[], monitoringOverall:{}, outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
 // ditahan lama. Angka 12 jam dulu ikut terbawa dari KMB yang katalognya ±1.400
@@ -447,6 +447,8 @@ function syncNow(manual) {
         // dulu hanya ditarik saat sub-tab dibuka DAN daftarnya kosong, jadi salinan
         // lama di IndexedDB bertahan selamanya walau server sudah menyaring.
         if (S.role === 'supervisor' || S.role === 'superintendent' || S.role === 'foreman_approver') { tasks.push(pullPending()); tasks.push(pullActive()); tasks.push(pullApproved()); }
+        // Monitoring memuat token mekanik — L1 & L2 saja, sejalan dengan gerbang server.
+        if (S.role === 'supervisor' || S.role === 'superintendent') { tasks.push(pullMonitoring()); }
         else if (S.role === 'foreman') { tasks.push(pullActive()); }   // foreman: pantau WO aktif
         // Sync yang DITEKAN pemakai selalu menarik katalog & daftar mekanik, tanpa
         // peduli TTL — menekan Sync berarti "ambil yang terbaru", dan itu satu-satunya
@@ -464,6 +466,19 @@ function syncNow(manual) {
       if (_syncAgain) { _syncAgain = false; return syncNow(false); }   // kirim sisa antrean
     });
 }
+/* Monitoring — cermin halaman Monitoring di web, hanya untuk L1 & L2.
+   Server menolak peran lain, jadi kegagalan di sini TIDAK boleh menjatuhkan
+   sinkron: peran yang tak berhak cukup diam, bukan memunculkan galat. */
+function pullMonitoring() {
+  return api('pull_monitoring').then(function(r) {
+    if (!r || !r.success) return;
+    S.monitoring = (r.result && r.result.mechanics) || [];
+    S.monitoringOverall = (r.result && r.result.overall) || {};
+    return kvSet('monitoring', S.monitoring)
+      .then(function(){ return kvSet('monitoring_overall', S.monitoringOverall); });
+  }).catch(function(){});
+}
+
 function flushOutbox() {
   var sent = 0;
   return obAll().then(function(items) {
@@ -591,7 +606,7 @@ function doLogout() {
   tx.objectStore('kv').clear();
   tx.objectStore('outbox').clear();
   tx.oncomplete = function() {
-    S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false };
+    S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], monitoring:[], monitoringOverall:{}, outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false };
     showScreen('login');
   };
 }
@@ -1529,6 +1544,18 @@ function renderAll() {
     tActive.style.display = isForeman ? '' : 'none';
     tActive.className = 'tab' + (S.tab === 'active' ? ' active' : '');
   }
+  // Monitoring: L1 & L2 SAJA — bukan seluruh approver. foreman_approver boleh
+  // menyetujui, tapi tak mengurus token siapa pun, sementara tab ini memuat
+  // token setiap mekanik. Token adalah identitas: pemegangnya bisa bertindak
+  // sebagai orang itu. Karena itu daftar-izin, bukan negasi — peran tak dikenal
+  // tak pernah kebagian.
+  var isL1L2 = (S.role === 'supervisor' || S.role === 'superintendent');
+  var tMon = document.getElementById('tabMonitor');
+  if (tMon) {
+    tMon.style.display = isL1L2 ? '' : 'none';
+    tMon.className = 'tab' + (S.tab === 'monitor' ? ' active' : '');
+  }
+  if (S.tab === 'monitor' && !isL1L2) S.tab = isApprover ? 'approval' : (isForeman ? 'create' : 'wos');
   document.getElementById('tabApproval').style.display = isApprover ? '' : 'none';
   document.getElementById('tabCreate').className = 'tab'+(S.tab==='create'?' active':'');
   document.getElementById('tabApproval').className = 'tab'+(S.tab==='approval'?' active':'');
@@ -1559,6 +1586,7 @@ function renderAll() {
   if (isMechanic) { renderWos(content); }
   else if (S.tab==='active') { content.innerHTML = '<div class="sub">WO yang sudah dibuat tapi belum di-submit mekanik</div>' + renderActiveList(); }
   else if (S.tab==='approval' && isApprover) { renderApprovalTab(content); }
+  else if (S.tab==='monitor' && isL1L2) { renderMonitorTab(content); }
   else { renderCreateTab(content); }
 }
 /** Tab mekanik: Assigned | Pending | Done */
@@ -1666,6 +1694,52 @@ function fmtJamMenit(h){
   if(j>0) return j+' jam';
   return m+' menit';
 }
+/* ── MONITORING (L1 & L2) — cermin halaman Monitoring di web ──
+   Menampilkan NAMA mekanik dan TOKEN-nya; alamat email tak pernah muncul. */
+function renderMonitorTab(el) {
+  var mons = S.monitoring || [];
+  if (!mons.length) {
+    el.innerHTML = '<div class="empty">Belum ada data monitoring. Tekan 🔄 Refresh saat ada sinyal.</div>';
+    return;
+  }
+  var ov = S.monitoringOverall || {};
+  var html = '<div class="card" style="padding:12px">'+
+    '<b>Ringkasan</b><div class="sub" style="margin-top:4px">'+
+      '📝 Perlu diisi: <b>'+(ov.pending_mechanic_work||0)+'</b> · '+
+      '⏳ L1: <b>'+(ov.pending_l1||0)+'</b> · '+
+      '⏳ L2: <b>'+(ov.pending_l2||0)+'</b> · '+
+      '✅ Approved: <b>'+(ov.approved||0)+'</b>'+
+    '</div></div>';
+
+  html += '<div class="sub">'+mons.length+' mekanik</div>';
+  mons.forEach(function(m) {
+    html += '<div class="card">'+
+      '<div class="cardTop"><b>'+esc(m.name||m.id)+'</b></div>'+
+      '<div class="cardBody">'+esc(m.id)+'<br>'+
+        '📝 '+(m.pending_mechanic_work||0)+' · ⏳ L1 '+(m.pending_l1||0)+
+        ' · ⏳ L2 '+(m.pending_l2||0)+' · ✅ '+(m.approved||0)+
+      '</div>';
+    if (m.has_token && m.token) {
+      html += '<div style="display:flex;gap:6px;align-items:center;margin-top:8px">'+
+        '<input class="inp" style="flex:1;font-family:monospace;font-size:13px" readonly value="'+esc(m.token)+'" onclick="this.select()">'+
+        '<button class="mini" onclick="salinToken(\''+esc(m.token)+'\',this)">📋 Salin</button>'+
+      '</div>';
+    } else {
+      html += '<div class="sub" style="color:#b45309;margin-top:6px">⚠️ Belum ada token — jalankan generateMissingTokens di editor GAS.</div>';
+    }
+    html += '</div>';
+  });
+  el.innerHTML = html;
+}
+
+function salinToken(tok, btn) {
+  var semula = btn.textContent;
+  var sukses = function(){ btn.textContent='✅'; setTimeout(function(){ btn.textContent=semula; },1500); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(tok).then(sukses).catch(function(){ toast('Salin manual: '+tok); });
+  } else { toast('Salin manual: '+tok); }
+}
+
 function renderApprovalTab(el) {
   var filteredPending = S.pending;
   if (S.role === 'supervisor') {
@@ -1814,9 +1888,9 @@ function renderApprovedList(){
 window.addEventListener('online',function(){renderAll(); syncNow(false);});
 window.addEventListener('offline',renderAll);
 openDb().then(function() {
-  return Promise.all([kvGet('token'),kvGet('me'),kvGet('wos'),kvGet('refs'),kvGet('pending'),kvGet('last_sync'),kvGet('role'),kvGet('refs_at'),kvGet('active'),kvGet('approved'),kvGet('timer_states')]);
+  return Promise.all([kvGet('token'),kvGet('me'),kvGet('wos'),kvGet('refs'),kvGet('pending'),kvGet('last_sync'),kvGet('role'),kvGet('refs_at'),kvGet('active'),kvGet('approved'),kvGet('timer_states'),kvGet('monitoring'),kvGet('monitoring_overall')]);
 }).then(function(v) {
-  S.token=v[0]||null; S.me=v[1]||null; S.wos=v[2]||[]; S.refs=v[3]||null; S.pending=v[4]||[]; S.lastSync=v[5]||null; S.role=v[6]||'mechanic'; S.refsAt=v[7]||null; S.active=v[8]||[]; S.approved=v[9]||[]; S.timerStates=v[10]||{};
+  S.token=v[0]||null; S.me=v[1]||null; S.wos=v[2]||[]; S.refs=v[3]||null; S.pending=v[4]||[]; S.lastSync=v[5]||null; S.role=v[6]||'mechanic'; S.refsAt=v[7]||null; S.active=v[8]||[]; S.monitoring=v[11]||[]; S.monitoringOverall=v[12]||{}; S.approved=v[9]||[]; S.timerStates=v[10]||{};
   startTimerTicker();
   return refreshOutbox();
 }).then(function() {
