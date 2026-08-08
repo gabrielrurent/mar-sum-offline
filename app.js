@@ -6,8 +6,8 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v38'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
-var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], rejected:[], monitoring:[], monitoringOverall:{}, outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
+var APP_VERSION = 'sum-v39'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], rejected:[], monitoring:[], monitoringOverall:{}, monitoringPeriode:'', outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
 // ditahan lama. Angka 12 jam dulu ikut terbawa dari KMB yang katalognya ±1.400
@@ -532,6 +532,7 @@ function pullMonitoring() {
     if (!r || !r.success) return;
     S.monitoring = (r.result && r.result.mechanics) || [];
     S.monitoringOverall = (r.result && r.result.overall) || {};
+    S.monitoringPeriode = (r.result && r.result.periode) || '';
     return kvSet('monitoring', S.monitoring)
       .then(function(){ return kvSet('monitoring_overall', S.monitoringOverall); });
   }).catch(function(){});
@@ -664,7 +665,7 @@ function doLogout() {
   tx.objectStore('kv').clear();
   tx.objectStore('outbox').clear();
   tx.oncomplete = function() {
-    S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], rejected:[], monitoring:[], monitoringOverall:{}, outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false };
+    S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], rejected:[], monitoring:[], monitoringOverall:{}, monitoringPeriode:'', outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false };
     showScreen('login');
   };
 }
@@ -1823,13 +1824,19 @@ function renderMonitorTab(el) {
     return;
   }
   var ov = S.monitoringOverall || {};
+  var per = S.monitoringPeriode || '';
+  // Angka tanpa keterangan periode akan disalahbaca sebagai total sepanjang
+  // masa — dan approved memang dulu begitu (4.187). Periodenya disebut di
+  // sebelah angkanya, bukan di catatan kaki.
   var html = '<div class="card" style="padding:12px">'+
-    '<b>Ringkasan</b><div class="sub" style="margin-top:4px">'+
+    '<b>Ringkasan'+(per?' · '+esc(per):'')+'</b><div class="sub" style="margin-top:4px">'+
       '📝 Perlu diisi: <b>'+(ov.pending_mechanic_work||0)+'</b> · '+
       '⏳ L1: <b>'+(ov.pending_l1||0)+'</b> · '+
       '⏳ L2: <b>'+(ov.pending_l2||0)+'</b> · '+
       '✅ Approved: <b>'+(ov.approved||0)+'</b>'+
-    '</div></div>';
+    '</div>'+
+    (per?'<div class="sub" style="margin-top:6px;color:#64748b">Approved dihitung untuk '+esc(per)+' saja. Bulan lampau lewat export Excel. Pending menampilkan SEMUA yang belum selesai, berapa pun umurnya.</div>':'')+
+    '</div>';
 
   html += '<div class="sub">'+mons.length+' mekanik</div>';
   mons.forEach(function(m) {
