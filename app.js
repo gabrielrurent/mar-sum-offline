@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v39'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v40'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], rejected:[], monitoring:[], monitoringOverall:{}, monitoringPeriode:'', outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
@@ -485,8 +485,24 @@ var _MENDARAT = {
   approve_l1:  ['pending_superintendent','approved'],
   approve_l2:  ['approved'],
   reject:      ['rejected'],
-  cancel_wo:   ['cancelled']
+  cancel_wo:   ['cancelled'],
+  // Permintaan transfer bisa dipastikan dari status: berhasil = menggantung.
+  request_transfer: ['pending_transfer']
 };
+
+/* Keputusan transfer TIDAK bisa dipastikan dari status.
+ *
+ * Approve dan reject transfer sama-sama mengembalikan WO ke tangan mekanik,
+ * jadi status akhirnya identik — mustahil membedakan "approve saya mendarat"
+ * dari "rekan saya menolaknya". Menebak di sini berarti bisa menghapus kartu
+ * approve yang gagal padahal yang terjadi justru penolakan, dan susunan tim
+ * menentukan siapa dibayar.
+ *
+ * Karena itu kartunya tetap dilepas bila transfernya sudah tak menggantung —
+ * op-nya memang tak bisa berbuat apa-apa lagi — TAPI SELALU DENGAN KABAR,
+ * tidak pernah diam-diam. Yang menekan berhak tahu keputusannya mungkin bukan
+ * keputusannya. */
+var _TRANSFER_KEPUTUSAN = {approve_transfer: true, reject_transfer: true};
 function saringOutboxSetelahSegar() {
   var peta = {};
   [].concat(S.wos||[], S.pending||[], S.active||[], S.approved||[]).forEach(function(w) {
@@ -496,11 +512,18 @@ function saringOutboxSetelahSegar() {
     var buang = [], berkabar = 0;
     items.forEach(function(it) {
       if (it.status !== 'failed') return;
-      var mendarat = _MENDARAT[it.action];
-      if (!mendarat) return;                       // save_override dll — jangan disentuh
       if (!peta.hasOwnProperty(String(it.wo_id))) return;   // tak dikenali → BIARKAN
       var st = peta[String(it.wo_id)];
       if (!st) return;
+
+      // Keputusan transfer: dilepas bila sudah tak menggantung, selalu berkabar.
+      if (_TRANSFER_KEPUTUSAN[it.action]) {
+        if (st !== 'pending_transfer') { buang.push(it.op_id); berkabar++; }
+        return;
+      }
+
+      var mendarat = _MENDARAT[it.action];
+      if (!mendarat) return;                       // save_override dll — jangan disentuh
       // Urutan ini penting: "sudah tamat" DIPERIKSA DULU. Kalau dibalik, kiriman
       // pada WO yang ternyata ditolak ikut dianggap berhasil lalu dihapus
       // diam-diam, dan orangnya tak pernah tahu keputusannya tidak masuk.
@@ -511,7 +534,7 @@ function saringOutboxSetelahSegar() {
     });
     if (!buang.length) return;
     return Promise.all(buang.map(function(id){ return obDel(id); })).then(function() {
-      if (berkabar) toast('ℹ️ '+berkabar+' kiriman dilepas — WO-nya sudah ditolak/dibatalkan');
+      if (berkabar) toast('ℹ️ '+berkabar+' kiriman dilepas — WO-nya sudah diputuskan di tempat lain');
       return refreshOutbox();
     });
   }).catch(function(){});
@@ -835,9 +858,14 @@ function queueApproveTransfer() {
     status: 'queued', created_at: new Date().toISOString(), label: 'Approve Transfer ' + activeTransferApproval.wo_number
   };
 
+  // Kartu transfer dulu TIDAK ikut dilepas — hanya approve/reject/cancel biasa
+  // yang dilepas. Akibatnya kartu transfer tetap terpampang setelah diputuskan,
+  // dan approver menekannya lagi karena mengira belum tersimpan.
+  var _nomorT = activeTransferApproval.wo_number || activeTransferApproval.id;
+  _lepasDariAntrean(activeTransferApproval.id);
   obPut(op).then(refreshOutbox).then(function() {
     closeModal('approveTransferModal'); closeModal('approveModal'); renderAll();
-    toast(navigator.onLine ? '📮 Approve transfer dikirim...' : '📮 Approve transfer tersimpan!');
+    toast('🔁 Transfer ' + _nomorT + ' disetujui' + (navigator.onLine ? '' : ' — terkirim saat ada sinyal'));
     syncNow(false);
   });
 }
@@ -858,9 +886,10 @@ function queueRejectTransfer(woId) {
     status: 'queued', created_at: new Date().toISOString(), label: 'Reject Transfer ' + (wo ? wo.wo_number : woId)
   };
 
+  _lepasDariAntrean(woId);
   obPut(op).then(refreshOutbox).then(function() {
     closeModal('approveModal'); renderAll();
-    toast(navigator.onLine ? '📮 Reject transfer dikirim...' : '📮 Reject transfer tersimpan!');
+    toast('🔁 Transfer ' + (wo ? wo.wo_number : woId) + ' ditolak' + (navigator.onLine ? '' : ' — terkirim saat ada sinyal'));
     syncNow(false);
   });
 }
@@ -1119,6 +1148,11 @@ function queueCancel(){
   });
 }
 function openApproveForm(woId) {
+  // Setiap WO dimulai dengan lembaran bersih — penanda dari WO sebelumnya tak
+  // boleh ikut terbawa dan mengunci approve yang tak ada urusannya.
+  _ovBelumSimpan = false;
+  _ovPasangPemantau();
+  _ovPerbaruiTanda();
   activeApproval = null;
   for (var i=0;i<S.pending.length;i++) if (String(S.pending[i].id)===String(woId)) activeApproval=S.pending[i];
   if (!activeApproval) return;
@@ -1278,6 +1312,7 @@ function queueOverride() {
   var op = { op_id:uuid(), seq:(_enqSeq++), action:'save_override', wo_id:activeApproval.id, wo_number:activeApproval.wo_number,
     payload:payload, status:'queued', created_at:new Date().toISOString(), label:'Override '+activeApproval.wo_number };
   obPut(op).then(refreshOutbox).then(function() {
+    _ovBelumSimpan = false; _ovPerbaruiTanda();
     renderAll();
     toast(navigator.onLine?'📮 Override dikirim — lanjut Approve':'📮 Override tersimpan (terkirim sebelum approve)');
     syncNow(false);
@@ -1286,6 +1321,39 @@ function queueOverride() {
 /* Lepas kartu dari antrean SEKARANG, tanpa menunggu server. Aman karena
    tarikan berikutnya mengembalikannya bila ternyata memang masih menunggu —
    dan approver yang kartunya tak kunjung hilang akan menekan Approve lagi. */
+/* ── OVERRIDE YANG BELUM DISIMPAN ──────────────────────────────────────────
+ * "Simpan Override" adalah tombol terpisah dari "Approve". Approver yang
+ * mengubah base points atau jam kerja lalu langsung menekan Approve — tanpa
+ * menyimpan lebih dulu — menyetujui WO dengan NILAI LAMA. Perubahannya hilang
+ * tanpa satu pun peringatan, dan yang terbayar bukan angka yang dia maksud.
+ *
+ * Tak ada cara pemakai mengetahuinya: layar menutup, kartu lepas, semuanya
+ * tampak berhasil. Baru ketahuan saat orang membandingkan slip gajinya.
+ *
+ * Penjaga ini menahan Approve selama masih ada perubahan yang belum disimpan.
+ * Sengaja MENOLAK, bukan menyimpan otomatis: menyimpan diam-diam berarti
+ * mengirim angka yang mungkin baru setengah diketik.
+ */
+var _ovBelumSimpan = false;
+var _ovPemantauTerpasang = false;
+
+function _ovTandaiBerubah() { _ovBelumSimpan = true; _ovPerbaruiTanda(); }
+
+function _ovPerbaruiTanda() {
+  var b = document.getElementById('ovBelumSimpanNota');
+  if (b) b.style.display = _ovBelumSimpan ? 'block' : 'none';
+}
+
+/** Dipasang sekali; menangkap perubahan pada SELURUH isi kotak override. */
+function _ovPasangPemantau() {
+  if (_ovPemantauTerpasang) return;
+  var kotak = document.getElementById('ovBody');
+  if (!kotak) return;
+  kotak.addEventListener('input',  _ovTandaiBerubah, true);
+  kotak.addEventListener('change', _ovTandaiBerubah, true);
+  _ovPemantauTerpasang = true;
+}
+
 function _lepasDariAntrean(woId) {
   S.pending = (S.pending || []).filter(function(w){ return String(w.id) !== String(woId); });
 }
@@ -1298,6 +1366,10 @@ function _kunciTombolApproval(kunci) {
   });
 }
 function queueApprove(level) {
+  if (_ovBelumSimpan) {
+    toast('⚠️ Ada perubahan override yang belum disimpan. Tekan 💾 Simpan Override dulu, atau tutup dan buka lagi untuk membatalkannya.');
+    return;
+  }
   if (_apprSibuk) return;
   _apprSibuk = true; _kunciTombolApproval(true);
   var action = level===1 ? 'approve_l1' : 'approve_l2';
