@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v40'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v41'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], rejected:[], monitoring:[], monitoringOverall:{}, monitoringPeriode:'', outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
@@ -1609,6 +1609,12 @@ function pesanRamah(err) {
   var e = String(err || '').trim();
   if (!e) return 'Tidak terkirim — coba lagi saat sinyal stabil.';
   var t = e.toLowerCase();
+  // WO yang gagal tersimpan: server sudah memastikan barisnya TIDAK ada, jadi
+  // tak ada yang perlu dikhawatirkan soal kembar. Yang berbahaya justru kalau
+  // pemakai mengisi form baru dari nol — kalau kiriman ini ternyata menyusul
+  // berhasil, WO-nya jadi dua. Karena itu perintahnya tegas: tekan Coba lagi.
+  if (t.indexOf('gagal tersimpan') !== -1 || t.indexOf('baris hilang') !== -1)
+    return 'WO tidak jadi tersimpan di server. Tekan 🔁 Coba lagi di bawah — JANGAN isi form baru, nanti WO-nya bisa jadi dua.';
   if (t.indexOf('pending_supervisor') !== -1 || t.indexOf('pending_superintendent') !== -1 ||
       t.indexOf('invalid stage') !== -1 || t.indexOf('must be in') !== -1)
     return 'WO ini sudah lewat tahap tersebut — kemungkinan sudah diproses orang lain atau kiriman sebelumnya sudah masuk. Tekan Buang bila WO-nya sudah benar.';
