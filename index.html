@@ -228,9 +228,16 @@
         <div style="font-size:11px;color:#0284c7;margin-top:7px;line-height:1.5">▶ mulai kerja · ⏸ jeda · ⏹ selesai. Durasi terhitung otomatis & tersimpan walau app ditutup. Memulai WO lain akan menjeda WO ini.</div>
       </div>
 
-      <!-- Jam mulai/selesai: DIISI OTOMATIS oleh timer (mekanik tak perlu mengetik).
-           Disembunyikan agar tak salah isi; nilainya tetap terkirim saat submit. -->
-      <div class="row2" id="manualTimeRow" style="display:none">
+      <!-- Jam mulai/selesai TERLIHAT lagi sejak 24 Sep 2026. Sebelumnya disembunyikan
+           "agar tak salah isi"; keputusan itu dibalik karena timer tak selalu sempat
+           ditekan — dan tanpa jalan keluar, jam yang salah justru lebih sering terjadi.
+           Timer tetap sumber kebenaran terakhir: ⏹ Stop MENIMPA apa pun yang diketik
+           (lihat pengisian fStart/fEnd di app.js). -->
+      <div style="background:#EFF6FF;border:1px solid #BFDBFE;color:#1E40AF;border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.5;margin-top:7px">
+        🕒 Jam terisi otomatis dari timer. Ubah manual hanya bila timer tak sempat dipakai —
+        menekan ⏹ Stop akan menimpa jam yang Anda ketik.
+      </div>
+      <div class="row2" id="manualTimeRow">
         <div><label>Jam Mulai *</label><input type="datetime-local" class="inp" id="fStart"></div>
         <div><label>Jam Selesai *</label><input type="datetime-local" class="inp" id="fEnd"></div>
       </div>
