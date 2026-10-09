@@ -6,8 +6,8 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v43'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
-var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], rejected:[], monitoring:[], monitoringOverall:{}, monitoringPeriode:'', outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
+var APP_VERSION = 'sum-v44'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], rejected:[], cancelable:[], monitoring:[], monitoringOverall:{}, monitoringPeriode:'', outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
 // ditahan lama. Angka 12 jam dulu ikut terbawa dari KMB yang katalognya ±1.400
@@ -467,6 +467,8 @@ function syncNow(manual) {
         // Monitoring memuat token mekanik — L1 & L2 saja, sejalan dengan gerbang server.
         if (S.role === 'supervisor' || S.role === 'superintendent') { tasks.push(pullMonitoring()); }
         else if (S.role === 'foreman') { tasks.push(pullActive()); }   // foreman: pantau WO aktif
+        // Menu Cancel WO (9 Okt 2026) — foreman & foreman_approver, sejalan dengan gerbang server.
+        if (bolehMenuCancelWoKlien(S.role)) { tasks.push(pullCancelable()); }
         // Sync yang DITEKAN pemakai selalu menarik katalog & daftar mekanik, tanpa
         // peduli TTL — menekan Sync berarti "ambil yang terbaru", dan itu satu-satunya
         // cara pemakai memaksa perubahan spreadsheet turun ke HP-nya.
@@ -656,6 +658,13 @@ function pullActive() {
     return kvSet('active', S.active);
   });
 }
+function pullCancelable() {
+  return api('pull_cancelable').then(function(r) {
+    if (!r.success) return;
+    S.cancelable = (r.result && r.result.cancelable) || [];
+    return kvSet('cancelable', S.cancelable);
+  });
+}
 function pullApproved() {
   return api('pull_approved').then(function(r) {
     if (!r.success) return;
@@ -718,7 +727,7 @@ function doLogout() {
   tx.objectStore('kv').clear();
   tx.objectStore('outbox').clear();
   tx.oncomplete = function() {
-    S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], rejected:[], monitoring:[], monitoringOverall:{}, monitoringPeriode:'', outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false };
+    S = { token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], rejected:[], cancelable:[], monitoring:[], monitoringOverall:{}, monitoringPeriode:'', outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false };
     showScreen('login');
   };
 }
@@ -731,6 +740,11 @@ function switchTab(tab) {
   if (tab === 'active' && navigator.onLine && (!S.active || !S.active.length)) {
     toast('⏳ Memuat WO aktif…');
     pullActive().then(function(){ renderAll(); }).catch(function(){ toast('⚠️ Gagal memuat WO aktif'); });
+  }
+  // Tab Cancel WO: selalu tarik yang terbaru saat dibuka — daftar ini menyusut
+  // tiap kali L1 approve, dan tombol pada WO yang baru saja disahkan pasti ditolak.
+  if (tab === 'cancel' && navigator.onLine && bolehMenuCancelWoKlien(S.role)) {
+    pullCancelable().then(function(){ renderAll(); }).catch(function(){ toast('⚠️ Gagal memuat daftar Cancel WO'); });
   }
 }
 
@@ -1157,6 +1171,24 @@ function resetCreateFieldsForNext(){
 /* ── Approval + Override + Cancel ── */
 var activeApproval = null;
 var cancelWoId = null;
+
+/* Cermin bolehMenuCancelWo / bolehCancelWo di Constants.gs (9 Okt 2026).
+   Server tetap penjaga terakhir — ini supaya tombol & menu tak tampil di WO
+   yang pasti ditolak. foreman & foreman_approver: hanya sampai sebelum L1
+   approve; Supervisor & PM: semua tahap. Diuji berdampingan dengan versi
+   server supaya keduanya tak pernah melenceng. */
+var CANCEL_TAHAP_FOREMAN_KLIEN = ['pending_mechanic_work','in_progress','created','pending_transfer','pending_supervisor'];
+function bolehMenuCancelWoKlien(role) {
+  var r = String(role || '').toLowerCase().trim();
+  return r === 'foreman' || r === 'foreman_approver';
+}
+function bolehCancelWoKlien(role, status) {
+  var r = String(role || '').toLowerCase().trim(), s = String(status || '');
+  if (!s || s === 'cancelled' || s === 'rejected') return false;
+  if (r === 'supervisor' || r === 'superintendent') return true;
+  if (r === 'foreman' || r === 'foreman_approver') return CANCEL_TAHAP_FOREMAN_KLIEN.indexOf(s) !== -1;
+  return false;
+}
 function openCancelForm(woId, woNumber){
   cancelWoId = woId;
   document.getElementById('cxDesc').textContent = woNumber || woId;
@@ -1386,6 +1418,7 @@ function _ovPasangPemantau() {
 
 function _lepasDariAntrean(woId) {
   S.pending = (S.pending || []).filter(function(w){ return String(w.id) !== String(woId); });
+  S.cancelable = (S.cancelable || []).filter(function(w){ return String(w.id) !== String(woId); });
 }
 /* Tombol approver dulu tak terkunci saat ditekan (mekanik sudah punya penjaga).
    Satu ketukan ragu di layar yang lambat = dua op untuk WO yang sama. */
@@ -1760,7 +1793,7 @@ function renderAll() {
   if (isMechanic) S.tab='wos';
   // Foreman boleh berada di tab 'create' ATAU 'active' (dulu selalu dipaksa balik ke
   // 'create', sehingga tab WO Aktif terasa "tidak bisa diklik").
-  else if (isForeman && S.tab!=='create' && S.tab!=='active') S.tab='create';
+  else if (isForeman && S.tab!=='create' && S.tab!=='active' && S.tab!=='cancel') S.tab='create';
   else if (isApprover && (S.tab==='wos' || S.tab==='active')) S.tab='approval';
   document.getElementById('tabBar').style.display = isCreator ? 'flex' : 'none';
   // Tab khusus mekanik: Assigned | Pending | Done
@@ -1796,6 +1829,14 @@ function renderAll() {
     tMon.className = 'tab' + (S.tab === 'monitor' ? ' active' : '');
   }
   if (S.tab === 'monitor' && !isL1L2) S.tab = isApprover ? 'approval' : (isForeman ? 'create' : 'wos');
+  // Cancel WO: foreman & foreman_approver saja (daftar-izin, sejalan dengan server).
+  var bolehCx = bolehMenuCancelWoKlien(S.role);
+  if (S.tab === 'cancel' && !bolehCx) S.tab = isApprover ? 'approval' : (isForeman ? 'create' : 'wos');
+  var tCx = document.getElementById('tabCancel');
+  if (tCx) {
+    tCx.style.display = bolehCx ? '' : 'none';
+    tCx.className = 'tab' + (S.tab === 'cancel' ? ' active' : '');
+  }
   document.getElementById('tabApproval').style.display = isApprover ? '' : 'none';
   document.getElementById('tabCreate').className = 'tab'+(S.tab==='create'?' active':'');
   document.getElementById('tabApproval').className = 'tab'+(S.tab==='approval'?' active':'');
@@ -1829,6 +1870,7 @@ function renderAll() {
   else if (S.tab==='active') { content.innerHTML = '<div class="sub">WO yang sudah dibuat tapi belum di-submit mekanik</div>' + renderActiveList(); }
   else if (S.tab==='approval' && isApprover) { renderApprovalTab(content); }
   else if (S.tab==='monitor' && isL1L2) { renderMonitorTab(content); }
+  else if (S.tab==='cancel' && bolehMenuCancelWoKlien(S.role)) { renderCancelTab(content); }
   else { renderCreateTab(content); }
 }
 /** Tab mekanik: Assigned | Pending | Done */
@@ -1988,6 +2030,49 @@ function salinToken(tok, btn) {
   } else { toast('Salin manual: '+tok); }
 }
 
+/* Tab "Cancel WO" (9 Okt 2026) — foreman & foreman_approver. Daftarnya dari
+   pull_cancelable (getDaftarCancelWo di server, sumber yang sama dengan menu web);
+   tombolnya memakai jendela Cancel yang sudah ada (openCancelForm → antrean
+   cancel_wo), jadi alasan tetap wajib dan penjaga tahap tetap di server. */
+var _cxCari = '';
+function renderCancelTab(el) {
+  el.innerHTML =
+    '<div class="card" style="padding:12px"><b>🚫 Cancel WO</b>'+
+      '<div class="sub" style="margin-top:4px">WO yang masih bisa dibatalkan: belum dikerjakan, sedang dikerjakan, '+
+      'menunggu transfer, atau sudah dikirim mekanik tapi belum di-approve L1. Setelah L1 approve, minta Supervisor/PM. '+
+      'Salah buat? Batalkan lalu buat WO baru yang benar.</div></div>'+
+    '<input class="inp" id="cxCari" type="search" placeholder="🔍 Cari nomor WO, komponen, unit, mekanik…" '+
+      'value="'+esc(_cxCari)+'" oninput="_cxCari=this.value; renderCancelDaftar()" style="width:100%;margin:8px 0;box-sizing:border-box">'+
+    '<div id="cxDaftar"></div>';
+  renderCancelDaftar();
+}
+function renderCancelDaftar() {
+  var box = document.getElementById('cxDaftar');
+  if (!box) return;
+  var semua = S.cancelable || [];
+  var q = String(_cxCari || '').toLowerCase().trim();
+  if (!semua.length) { box.innerHTML = '<div class="empty">Tidak ada WO yang bisa dibatalkan. Tekan 🔄 Refresh saat ada sinyal.</div>'; return; }
+  var tampil = semua.filter(function(w) {
+    if (!q) return true;
+    return [w.wo_number, w.component_name, w.unit_name, (w.team_names||[]).join(' '), w.created_by_name, w.status_label]
+      .join(' ').toLowerCase().indexOf(q) !== -1;
+  });
+  if (!tampil.length) { box.innerHTML = '<div class="empty">Tidak ada yang cocok dengan pencarian.</div>'; return; }
+  box.innerHTML = '<div class="sub">'+tampil.length+' dari '+semua.length+' WO</div>' + tampil.map(function(w) {
+    var antre = queuedOpFor(w.id);
+    return '<div class="card">'+
+      '<div class="cardTop"><b>'+esc(w.wo_number)+'</b> <span class="badge">'+esc(w.status_label || w.status)+'</span></div>'+
+      '<div class="cardBody">'+esc(w.component_name)+'<br>'+
+        'Unit: '+esc(w.unit_name)+' · '+esc(w.location)+'<br>'+
+        'Tim: '+esc((w.team_names||[]).join(', ') || '-')+'<br>'+
+        'Dibuat: '+esc(fmtDateTime(w.created_at))+' oleh '+esc(w.created_by_name)+
+        (w.submitted_at ? '<br>Dikirim: '+esc(fmtDateTime(w.submitted_at))+' oleh '+esc(w.submitted_by_name) : '')+
+      '</div>'+
+      (antre ? queuedNote(antre) : cancelBtn(w))+
+    '</div>';
+  }).join('');
+}
+
 function renderApprovalTab(el) {
   var filteredPending = S.pending;
   if (S.role === 'supervisor') {
@@ -2090,7 +2175,12 @@ function namaOrang(nama, email) {
 
 function teamStr(team){ return (team||[]).map(function(t){ return esc(t.name||t.mechanic_name||t.mechanic_id||t); }).join(', '); }
 function ovBadges(wo){ return (wo.has_override_spv?'<span class="badge" style="background:#4338ca">SPV override</span>':'')+(wo.has_override_supt?'<span class="badge" style="background:#7c3aed">SUPT override</span>':''); }
-function cancelBtn(wo){ return '<button class="big secondary" onclick="openCancelForm(\''+esc(String(wo.id))+'\',\''+esc(String(wo.wo_number))+'\')">🗑 Batalkan WO</button>'; }
+function cancelBtn(wo){
+  // Tak menggambar tombol yang pasti ditolak server (bolehCancelWo): sejak 9 Okt
+  // 2026 foreman_approver hanya boleh cancel sampai sebelum L1 approve.
+  if (!bolehCancelWoKlien(S.role, wo.status)) return '';
+  return '<button class="big secondary" onclick="openCancelForm(\''+esc(String(wo.id))+'\',\''+esc(String(wo.wo_number))+'\')">🗑 Batalkan WO</button>';
+}
 function renderPendingList(list){
   var pendingList = list || S.pending;
   if (!pendingList.length) return '<div class="empty">Tidak ada WO menunggu approval.</div>';
@@ -2186,9 +2276,9 @@ function renderApprovedList(){
 window.addEventListener('online',function(){renderAll(); syncNow(false);});
 window.addEventListener('offline',renderAll);
 openDb().then(function() {
-  return Promise.all([kvGet('token'),kvGet('me'),kvGet('wos'),kvGet('refs'),kvGet('pending'),kvGet('last_sync'),kvGet('role'),kvGet('refs_at'),kvGet('active'),kvGet('approved'),kvGet('timer_states'),kvGet('monitoring'),kvGet('monitoring_overall'),kvGet('rejected')]);
+  return Promise.all([kvGet('token'),kvGet('me'),kvGet('wos'),kvGet('refs'),kvGet('pending'),kvGet('last_sync'),kvGet('role'),kvGet('refs_at'),kvGet('active'),kvGet('approved'),kvGet('timer_states'),kvGet('monitoring'),kvGet('monitoring_overall'),kvGet('rejected'),kvGet('cancelable')]);
 }).then(function(v) {
-  S.token=v[0]||null; S.me=v[1]||null; S.wos=v[2]||[]; S.refs=v[3]||null; S.pending=v[4]||[]; S.lastSync=v[5]||null; S.role=v[6]||'mechanic'; S.refsAt=v[7]||null; S.active=v[8]||[]; S.monitoring=v[11]||[]; S.monitoringOverall=v[12]||{}; S.rejected=v[13]||[]; S.approved=v[9]||[]; S.timerStates=v[10]||{};
+  S.token=v[0]||null; S.me=v[1]||null; S.wos=v[2]||[]; S.refs=v[3]||null; S.pending=v[4]||[]; S.lastSync=v[5]||null; S.role=v[6]||'mechanic'; S.refsAt=v[7]||null; S.active=v[8]||[]; S.monitoring=v[11]||[]; S.monitoringOverall=v[12]||{}; S.rejected=v[13]||[]; S.cancelable=v[14]||[]; S.approved=v[9]||[]; S.timerStates=v[10]||{};
   startTimerTicker();
   return refreshOutbox();
 }).then(function() {
