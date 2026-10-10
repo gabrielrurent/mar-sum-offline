@@ -384,6 +384,18 @@
     </div>
   </div>
 
+  <!-- MODAL: Monitoring — daftar di balik angka & detail WO (9 Okt 2026) -->
+  <div class="modal" id="monModal" onclick="if(event.target===this)closeModal('monModal')">
+    <div class="sheet">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <button class="mini gray" id="monKembali" onclick="monKembaliPwa()" style="display:none">← Daftar</button>
+        <h2 id="monJudul" style="flex:1;margin:0;font-size:17px">…</h2>
+        <button class="mini gray" onclick="closeModal('monModal')">✕</button>
+      </div>
+      <div id="monIsi"></div>
+    </div>
+  </div>
+
   <!-- MODAL: Cancel WO -->
   <div class="modal" id="cancelModal">
     <div class="sheet">

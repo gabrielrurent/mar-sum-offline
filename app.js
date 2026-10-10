@@ -6,7 +6,7 @@
    ============================================================ */
 
 var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v44'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+var APP_VERSION = 'sum-v45'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], rejected:[], cancelable:[], monitoring:[], monitoringOverall:{}, monitoringPeriode:'', outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu
@@ -1991,14 +1991,24 @@ function renderMonitorTab(el) {
   // Angka tanpa keterangan periode akan disalahbaca sebagai total sepanjang
   // masa — dan approved memang dulu begitu (4.187). Periodenya disebut di
   // sebelah angkanya, bukan di catatan kaki.
+  // 9 Okt 2026: setiap angka bisa diketuk → daftarnya → ketuk WO → detail lengkap.
+  // Expired (lewat 12 jam) dipisah dari "belum dikerjakan" — kategori saling lepas,
+  // dihitung satu fungsi di server (_kategoriMonitoring) untuk angka MAUPUN daftarnya.
+  function tombolMon(kat, label, n, merah) {
+    return '<button class="mini" style="margin:3px 4px 3px 0'+(merah?';color:#b91c1c;border-color:#fecaca':'')+'" '+
+      'onclick="monBukaDaftarPwa(\''+kat+'\')">'+label+' <b>'+(n||0)+'</b></button>';
+  }
   var html = '<div class="card" style="padding:12px">'+
-    '<b>Ringkasan'+(per?' · '+esc(per):'')+'</b><div class="sub" style="margin-top:4px">'+
-      '📝 Perlu diisi: <b>'+(ov.pending_mechanic_work||0)+'</b> · '+
-      '⏳ L1: <b>'+(ov.pending_l1||0)+'</b> · '+
-      '⏳ L2: <b>'+(ov.pending_l2||0)+'</b> · '+
-      '✅ Approved: <b>'+(ov.approved||0)+'</b>'+
+    '<b>Ringkasan'+(per?' · '+esc(per):'')+'</b><div style="margin-top:6px">'+
+      '<button class="mini" style="margin:3px 4px 3px 0" onclick="monBukaMekanikPwa()">👥 Mekanik <b>'+mons.length+'</b></button>'+
+      tombolMon('belum', '📝 Belum dikerjakan', ov.pending_mechanic_work)+
+      tombolMon('expired', '⌛ Expired', ov.expired, true)+
+      tombolMon('l1', '⏳ L1', ov.pending_l1)+
+      tombolMon('l2', '⏳ L2', ov.pending_l2)+
+      tombolMon('approved', '✅ Approved', ov.approved)+
     '</div>'+
-    (per?'<div class="sub" style="margin-top:6px;color:#64748b">Approved dihitung untuk '+esc(per)+' saja. Bulan lampau lewat export Excel. Pending menampilkan SEMUA yang belum selesai, berapa pun umurnya.</div>':'')+
+    '<div class="sub" style="margin-top:6px;color:#64748b">Ketuk angka untuk melihat daftarnya, lalu ketuk WO untuk detailnya. '+
+      'Belum dikerjakan = kurang dari 12 jam; lewat 12 jam masuk Expired.'+(per?' Approved dihitung untuk '+esc(per)+' saja; bulan lampau lewat export Excel.':'')+'</div>'+
     '</div>';
 
   html += '<div class="sub">'+mons.length+' mekanik</div>';
@@ -2006,7 +2016,7 @@ function renderMonitorTab(el) {
     html += '<div class="card">'+
       '<div class="cardTop"><b>'+esc(m.name||m.id)+'</b></div>'+
       '<div class="cardBody">'+esc(m.id)+'<br>'+
-        '📝 '+(m.pending_mechanic_work||0)+' · ⏳ L1 '+(m.pending_l1||0)+
+        '📝 '+(m.pending_mechanic_work||0)+' · ⌛ '+(m.expired||0)+' · ⏳ L1 '+(m.pending_l1||0)+
         ' · ⏳ L2 '+(m.pending_l2||0)+' · ✅ '+(m.approved||0)+
       '</div>';
     if (m.has_token && m.token) {
@@ -2028,6 +2038,137 @@ function salinToken(tok, btn) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(tok).then(sukses).catch(function(){ toast('Salin manual: '+tok); });
   } else { toast('Salin manual: '+tok); }
+}
+
+/* ── Monitoring bisa diketuk (9 Okt 2026) ─────────────────────────────────
+   Daftar di balik angka & detail WO dimuat dari server SAAT diketuk
+   (pull_monitoring_daftar → getMonitoringDaftar, pull_wo_detail →
+   getMonitoringDetailWo) — sumber yang sama dengan halaman Monitoring web.
+   Butuh sinyal: daftar ini selalu segar, tak disimpan di HP. */
+var _monDaftarPwa = null, _monCariPwa = '';
+function monTampilPwa(judul, html, bisaKembali) {
+  document.getElementById('monJudul').textContent = judul;
+  document.getElementById('monIsi').innerHTML = html;
+  document.getElementById('monKembali').style.display = bisaKembali ? '' : 'none';
+  showModal('monModal');
+}
+function monKembaliPwa() { if (_monDaftarPwa) monGambarDaftarPwa(_monDaftarPwa); }
+function monGagalPwa(pesan) { monTampilPwa('Gagal memuat', '<div class="err">'+esc(pesan)+'</div>', !!_monDaftarPwa); }
+function _monPesanGagal(r) {
+  if (!r) return '';
+  return (typeof r.error === 'string') ? r.error : ((r.error && r.error.message) || '');
+}
+function monBukaMekanikPwa() {
+  _monDaftarPwa = null;
+  var mons = S.monitoring || [];
+  var h = '<div class="sub" style="margin-bottom:6px">'+mons.length+' mekanik · yang paling banyak pekerjaan terbengkalai di atas</div>'+
+    mons.map(function(m) {
+      return '<div class="card"><div class="cardTop"><b>'+esc(m.name||m.id)+'</b> <span class="sub">'+esc(m.id)+'</span></div>'+
+        '<div class="cardBody">📝 '+(m.pending_mechanic_work||0)+' · ⌛ '+(m.expired||0)+' · ⏳ L1 '+(m.pending_l1||0)+
+        ' · ⏳ L2 '+(m.pending_l2||0)+' · ✅ '+(m.approved||0)+'</div></div>';
+    }).join('');
+  monTampilPwa('👥 Daftar Mekanik', h, false);
+}
+function monBukaDaftarPwa(kategori) {
+  if (!navigator.onLine) { toast('⚠️ Butuh sinyal untuk memuat daftar'); return; }
+  _monDaftarPwa = null; _monCariPwa = '';
+  monTampilPwa('Memuat…', '<div class="empty">⏳ Memuat daftar…</div>', false);
+  api('pull_monitoring_daftar', {kategori: kategori}).then(function(r) {
+    if (!r || !r.success) { monGagalPwa(_monPesanGagal(r) || 'Daftar gagal dimuat.'); return; }
+    _monDaftarPwa = r.result; monGambarDaftarPwa(_monDaftarPwa);
+  }).catch(function(e) {
+    monGagalPwa((e && e.maintenance) ? 'Server sedang maintenance — coba lagi nanti.' : 'Koneksi terputus — coba lagi.');
+  });
+}
+function monGambarDaftarPwa(d) {
+  var q = String(_monCariPwa || '').toLowerCase().trim();
+  var items = (d.items || []).filter(function(w) {
+    if (!q) return true;
+    return [w.wo_number, w.component_name, w.unit_name, (w.team_names||[]).join(' '), w.created_by_name, w.l1_name]
+      .join(' ').toLowerCase().indexOf(q) !== -1;
+  });
+  var h = '<input class="inp" id="monCari" type="search" placeholder="🔍 Cari nomor WO, komponen, unit, mekanik…" '+
+    'value="'+esc(_monCariPwa)+'" style="width:100%;box-sizing:border-box;margin-bottom:6px">';
+  h += '<div class="sub" style="margin-bottom:6px">'+(d.total > d.ditampilkan ? d.ditampilkan+' terbaru dari '+d.total+' WO' : d.total+' WO')+
+    (q ? ' · '+items.length+' cocok' : '')+'</div>';
+  if (!items.length) h += '<div class="empty">'+(d.total ? 'Tidak ada yang cocok.' : 'Tidak ada WO di kategori ini.')+'</div>';
+  h += items.map(function(w) {
+    var chip = '';
+    if (d.kategori === 'expired') chip = ' <span class="badge" style="background:#fee2e2;color:#b91c1c">'+(w.umur_jam !== null ? w.umur_jam+' jam' : '')+(w.dilaporkan ? ' · dilaporkan' : '')+'</span>';
+    else if (d.kategori === 'belum') chip = ' <span class="badge">'+(w.umur_jam !== null ? w.umur_jam+' jam' : '')+'</span>';
+    else if (d.kategori === 'approved') chip = ' <span class="badge" style="background:#dcfce7;color:#166534">'+w.final_points+' poin</span>';
+    var waktu = d.kategori === 'l1' ? 'Dikirim '+fmtDateTime(w.submitted_at)+' oleh '+esc(w.submitted_by_name||'-')
+              : d.kategori === 'l2' ? 'L1 '+fmtDateTime(w.l1_at)+' oleh '+esc(w.l1_name||'-')
+              : d.kategori === 'approved' ? 'L2 '+fmtDateTime(w.l2_at)+' oleh '+esc(w.l2_name||'-')
+              : 'Dibuat '+fmtDateTime(w.created_at)+' oleh '+esc(w.created_by_name||'-')+(w.dibuka_ulang ? ' · dibuka ulang' : '');
+    // id dibaca dari data-id, tak pernah disisipkan ke dalam kode onclick.
+    return '<div class="card" style="cursor:pointer" data-id="'+esc(w.id)+'" onclick="monBukaDetailPwa(this.getAttribute(\'data-id\'))">'+
+      '<div class="cardTop"><b>'+esc(w.wo_number)+'</b>'+chip+'</div>'+
+      '<div class="cardBody">'+esc(w.component_name)+'<br>Unit: '+esc(w.unit_name)+' · '+esc(w.location)+
+      '<br>Tim: '+esc((w.team_names||[]).join(', ')||'-')+'<br>'+waktu+'</div></div>';
+  }).join('');
+  monTampilPwa(d.judul, h, false);
+  var c = document.getElementById('monCari');
+  if (c) c.oninput = function() {
+    _monCariPwa = this.value; var pos = this.selectionStart; monGambarDaftarPwa(d);
+    var c2 = document.getElementById('monCari'); if (c2) { c2.focus(); try { c2.setSelectionRange(pos, pos); } catch (e) {} }
+  };
+}
+function monBukaDetailPwa(id) {
+  if (!navigator.onLine) { toast('⚠️ Butuh sinyal untuk memuat detail'); return; }
+  monTampilPwa('Memuat…', '<div class="empty">⏳ Memuat detail WO…</div>', !!_monDaftarPwa);
+  api('pull_wo_detail', {wo_id: id}).then(function(r) {
+    if (!r || !r.success) { monGagalPwa(_monPesanGagal(r) || 'Detail gagal dimuat.'); return; }
+    monGambarDetailPwa(r.result);
+  }).catch(function(e) {
+    monGagalPwa((e && e.maintenance) ? 'Server sedang maintenance — coba lagi nanti.' : 'Koneksi terputus — coba lagi.');
+  });
+}
+function _monKv(k, v) {
+  return '<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0;border-bottom:1px dashed var(--border)">'+
+    '<span class="sub" style="margin:0">'+esc(k)+'</span><b style="text-align:right">'+esc(v === null || v === undefined || v === '' ? '-' : v)+'</b></div>';
+}
+function _monBagian(judul, isi) { return '<div style="margin-top:12px"><div class="sub" style="font-weight:700;letter-spacing:.4px">'+esc(judul.toUpperCase())+'</div>'+isi+'</div>'; }
+function monGambarDetailPwa(k) {
+  var kondisi = {normal:'Normal', difficult:'Malam/Hujan', extreme:'Resiko Tinggi'}[k.work_condition] || k.work_condition;
+  var part = {baru:'Baru', repair:'Repair', canibal:'Kanibal'}[k.part_type] || k.part_type;
+  var sumber = {superintendent:' (override L2)', supervisor:' (override L1)', original:''};
+  var chips = '<span class="badge">'+esc(k.status_label)+'</span>';
+  if (k.lewat_12_jam) chips += ' <span class="badge" style="background:#fee2e2;color:#b91c1c">Expired · '+k.umur_jam+' jam</span>';
+  if (k.is_reported_expired) chips += ' <span class="badge" style="background:#fee2e2;color:#b91c1c">Dilaporkan expired</span>';
+  if (k.timeliness) chips += ' <span class="badge" style="background:#dcfce7;color:#166534">'+esc(k.timeliness.label)+'</span>';
+  if (k.safety_incident) chips += ' <span class="badge" style="background:#fee2e2;color:#b91c1c">Insiden safety</span>';
+  var comp = k.component || {}, unit = k.unit || {};
+  var h = '<div><b style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:16px">'+esc(k.wo_number)+'</b> '+chips+'</div>';
+  h += _monBagian('Komponen', _monKv('No', comp.component_no)+_monKv('Nama', k.is_others ? 'Others — '+(k.others_description||'Custom Job') : comp.component_name)+
+    _monKv('Kategori', comp.category)+_monKv('Keterangan', k.keterangan));
+  h += _monBagian('Unit', _monKv('ID', unit.unit_id)+_monKv('Nama', unit.unit_name)+_monKv('Lokasi', k.location));
+  h += _monBagian('Pekerjaan',
+    _monKv('Kondisi', kondisi)+_monKv('Jam kerja aktual', fmtJamMenit(k.actual_hours))+
+    _monKv('Mulai – selesai', k.start_time ? fmtDateTime(k.start_time)+' – '+fmtDateTime(k.end_time) : '-')+
+    _monKv('Hour meter', k.hour_meter)+_monKv('Kilometer', k.kilometers)+_monKv('Jenis part', part)+
+    _monKv('Target jam', (k.effective_target_hours||0)+' jam'+(sumber[k.effective_target_hours_source]||''))+
+    _monKv('Base points', (k.effective_base_points||0)+(sumber[k.effective_base_points_source]||''))+
+    _monKv('Unit factor', unit.unit_factor));
+  h += _monBagian('Tim'+(sumber[k.effective_team_source]||''), _monKv('Anggota', (k.effective_team||[]).map(function(m){ return m.mechanic_name; }).join(', ')));
+  h += _monBagian('Riwayat',
+    _monKv('Dibuat', fmtDateTime(k.created_at)+' · '+(k.created_by_name||'-'))+
+    _monKv('Dikirim mekanik', k.submitted_at ? fmtDateTime(k.submitted_at)+' · '+(k.submitted_by_name||'-') : '-')+
+    (k.reopened_at ? _monKv('Dibuka ulang', fmtDateTime(k.reopened_at)) : '')+
+    _monKv('Approve L1', k.supervisor_approved_at ? fmtDateTime(k.supervisor_approved_at)+' · '+(k.approved_by_supervisor_name||'-') : '-')+
+    _monKv('Approve L2', k.l2_at ? fmtDateTime(k.l2_at)+' · '+(k.l2_name||'-') : '-'));
+  if ((k.override_summary||[]).length) {
+    h += _monBagian('Override', k.override_summary.map(function(o) {
+      return _monKv(o.level_label+' · '+(o.by_name||'-'), (o.changes||[]).map(function(c){ return c.label+': '+c.to; }).join(' · '));
+    }).join(''));
+  }
+  if (k.final_points !== null && k.final_points !== undefined) {
+    var p = _monKv('Final points', k.final_points);
+    (k.poin_terbit||[]).forEach(function(r) { p += _monKv(r.nama, r.poin+' poin · Rp '+fmtIdr(r.rupiah)); });
+    h += _monBagian('Poin', p);
+  }
+  if (k.dibatalkan) h += _monBagian('Dibatalkan / ditolak', _monKv('Oleh', k.dibatalkan.oleh)+_monKv('Pada', fmtDateTime(k.dibatalkan.pada))+_monKv('Alasan', k.dibatalkan.alasan));
+  monTampilPwa('Detail WO', h, !!_monDaftarPwa);
 }
 
 /* Tab "Cancel WO" (9 Okt 2026) — foreman & foreman_approver. Daftarnya dari
