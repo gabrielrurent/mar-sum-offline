@@ -5,8 +5,11 @@
    MTBF mati, foreman create-only, override L1/L2 (parity web).
    ============================================================ */
 
-var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec' };
-var APP_VERSION = 'sum-v45'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
+// Sejak 15 Nov 2026 API lewat Worker abadiops (sum.abadiops.com/api): selama saklar SUM "gas" Worker
+// meneruskan setiap kiriman ke web app GAS di bawah tanpa mengubah apa pun; saat migrasi, kiriman ikut saklar.
+// Web app GAS: https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec
+var CONFIG = { API_URL: 'https://sum.abadiops.com/api' };
+var APP_VERSION = 'sum-v46'; // cadangan; nilai sebenarnya dibaca dari CACHE sw.js (syncVersionFromCache)
 var S = { mechTab:'assigned', token:null, me:null, role:null, wos:[], refs:null, refsAt:null, pending:[], active:[], approved:[], rejected:[], cancelable:[], monitoring:[], monitoringOverall:{}, monitoringPeriode:'', outbox:[], lastSync:null, syncing:false, tab:'wos', appSub:'pending', showOutbox:false, timerStates:{} };
 // Referensi kecil (komponen/unit/mekanik) — tarik ulang maks 1x/12 jam.
 // Katalog SUM kecil (±148 komponen, 47 unit) — menariknya murah, jadi tak perlu

@@ -1,4 +1,4 @@
-var CACHE = 'mar-sum-v45';
+var CACHE = 'mar-sum-v46';
 var ASSETS = ['./', './index.html', './app.js', './manifest.json', './icon-192.png', './icon-512.png', './foto.png', './bg-login.jpg'];
 self.addEventListener('install', function(e) {
   e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(ASSETS);}));
@@ -17,7 +17,7 @@ self.addEventListener('activate', function(e) {
    Saat sinyal kembali, Chrome membangunkan SW ini → flush outbox dari
    IndexedDB. Kalau masih gagal (offline), promise reject → Chrome retry
    otomatis dgn backoff. Server dedup via op_id (ProcessedOps) → aman dobel. */
-var API_URL = 'https://script.google.com/macros/s/AKfycbzB5EUJlpGRaDTFvfr3bl117hd_Oa2k4seCecTYy4Ct8_oYRefu8U9BqG6zu3M-BoFS/exec';
+var API_URL = 'https://sum.abadiops.com/api';   // sama dengan CONFIG.API_URL di app.js (Worker abadiops)
 function swDb() {
   return new Promise(function(res, rej) {
     var r = indexedDB.open('mar_sum_v1', 1);
